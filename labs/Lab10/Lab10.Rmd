@@ -1,0 +1,417 @@
+---
+title: "Stat 115 Lab 10"
+subtitle: "GWAS, Regression, Feature Selection"
+author: "Yushi Tang"
+date: "April 9/11, 2019"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center")
+```
+
+
+## Anouncements
+
+- HW5 is due on April 14, 2019 @ 11:59 pm
+- Additional office hour on this Friday 11:30 am - 12:30 pm @ HSPH Building 2 Room 428
+
+
+## Outline
+
+- Genome-Wide Association Study (GWAS)
+    - Building blocks for a complete GWAS
+    - General procedure
+    - Other technique details
+- Regression and Feature Selection
+    - Mathematical details
+    - Examples
+    - Cheer for experiences
+
+## Install and Load Packages
+
+```{r install, eval = FALSE, warning = FALSE, message = FALSE}
+install.packages("glmnet")
+```
+
+```{r libraries, warning = FALSE, message = FALSE}
+library(glmnet)
+library(ggplot2)
+```
+
+## Part I: Genome-Wide Association Study (GWAS) 
+-  From genetic variation to phenotypic variation
+-  Mapping?
+-  Connection between genotype and phenotype!
+-  Genotype: Pair of alleles at a locus
+    - e.g. AA, Aa, aa
+    - Heterozygote (Aa), Homozygote (AA and aa)
+-  Phenotype: A specific trait or an observable characteristic
+
+## Linkage Disequilibrium (LD) Analysis
+-  Haploview:
+    - http://www.broadinstitute.org/haploview/haploview 
+    - choosing tag SNPs
+-  SNAP:
+    - http://www.broadinstitute.org/mpg/snap/
+    - choosing proxies of the tag SNPs
+-  FUGUE (Frequency Using Graphs based on EM Algorithm):
+    - http://csg.sph.umich.edu/yli/software.html
+    - computing D' and $R^2$ using genotype data
+
+## Haplotype Inference
+- FUGUE (Frequency Using Graphs based on EM Algorithm):
+    - http://csg.sph.umich.edu/yli/software.html
+    - estimating haplotype frequency based on genotype data
+- MACH (Markov Chain based Haplotyper):
+    - http://csg.sph.umich.edu/abecasis/MaCH/
+    - estimating most likely haplotype based on genotype data
+
+
+## Data Quality Control (QC)
+-  PLINK:
+    - https://www.cog-genomics.org/plink/2.0/
+    - plink.lmiss/plink.vmiss: removing SNPs with large missing rate
+    - removing SNPs that violate HWE
+    - removing SNPs with extremely small minor allele frequency (MAF)
+-  Still debating:
+    - Other indicators of good quality for considering
+        - how to test the HWE more accurate
+        - combined depth of specific allele 
+        - ratio of transitions over transversions
+        - ratio of heterozygous over homozygous variance
+        - ratio of insertion over deletion
+
+    
+
+## Measuring the Connection (Association Analysis)
+- The case-control genetic association studies for most settings
+- A glance of the data
+   
+|Genotype|AA(1/1,2)|Aa(0/1|1/0,1)|aa(0/0,0)|Sum     |
+|--------|---------|-------------|---------|--------|
+|Cases   |$N_{12}$ |$N_{11}$     |$N_{10}$ |$N_{1.}$|
+|Controls|$N_{02}$ |$N_{01}$     |$N_{00}$ |$N_{0.}$|
+|Sum     |$N_{.2}$ |$N_{.1}$     |$N_{.0}$ |$N_{..}$|
+
+
+## Measuring the Connection (Association Analysis)
+-  PLINK:
+    - https://www.cog-genomics.org/plink/2.0/
+    - estimating the association between a quantitative trait and mutations
+    - plink.glm.linear: conduct linear regression
+    - plink.glm.logistic: conduct logistic regression
+-  Armitage Trend Test (ATT) for Association Testing
+    - often used as genotype-based test for case-control genetic association studies
+    - a glance of ATT data
+    
+$$
+\chi^2 = N\times \{r(G,P)\}^2
+$$
+
+
+
+## Other Issues
+-  Fine-mapping and SNPs imputation (when we do not have WGS data)
+-  Considering population structure
+    - Measuring population distance: $F_{ST}$ 
+
+-  Adjusting population stratification bias
+    - How to measure this bias? 
+    - Q-Q plot and $\lambda_{GC}$
+    - PCA: a solution for population stratification
+    - Using Mixed Model Association to adjust
+    
+-  Controling sample relatedness
+    - How to measure relatedness? 
+    - Kinship matrix for now (https://brainder.org/2015/07/29/understanding-the-kinship-matrix/)
+    - Potential problems
+    - Correct cryptic relatedness / family relatedness (Mixed Model Association)
+    
+-  Phenotype inference based on genotype data
+    - e.g.1 sex inference
+    - e.g.2 ethnicity inference
+-  ...
+-  All techniques above could all be done with python
+
+
+
+## Reconsidering the Causal Procedure within the Connection
+-  Incorporating epigenetic scores/ functional annotation results to improve the power of GWAS
+    - HaploReg: https://pubs.broadinstitute.org/mammals/haploreg/haploreg.php
+        - Annotate SNP with chromatin state
+        - Add the protein binding annotation
+        - Annotation information comes from the Roadmap Epigenomics and ENCODE projects
+    - RegulomeDB: http://regulome.stanford.edu/
+        - Identify DNA features in non-coding regions
+        - Detect regulatory elements in non-coding regions
+        - Regions of DNAase hypersensitivity
+        - Binding sites of transcription factors
+        - Promoter regions that have been biochemically characterized to regulation transcription.
+-  Incorporating DNA-methylation
+-  Incorporating DNA 3D shape parameters
+-  Incorporating higher-order chromatin structure
+-  Other informational epigenomic factors (over 200)
+
+
+## Part II: Regression and Feature Selection
+
+- Objective: find best-fit line to data.
+- For each subject $i$, observe outcome $Y_i$ and vector of covariates $X_i$.
+- Mathematical details: try to obtain $\boldsymbol{\beta}$ that could minimize
+$$
+\sum_{i = 1}^n (Y_i - X_i \beta)^2
+$$
+$$\hat{\beta} = (X^T X)^{-1} X^T Y$$
+
+
+
+```{r lm}
+# 1 covariate
+model_1 <- lm(mpg ~ wt, data = mtcars)
+summary(model_1)
+
+# set the intercept as 0
+model_2 <- lm(mpg ~ wt - 1, data = mtcars)
+summary(model_2)
+
+# multiple covariates
+model_3 <- lm(mpg ~ wt + cyl, data = mtcars)
+summary(model_3)
+
+```
+
+
+## LASSO
+- Linear regression deals with limited number of covariates
+- What if we have a huge amount of covariates? 
+- Lasso for variable selection! 
+- Penalize $\beta$ for being too big.
+- Try to obtain $\boldsymbol{\beta}$ and $\lambda$ that could minimize
+
+$$
+\sum_{i = 1}^n (Y_i - X_i \beta)^2 + \lambda \sum_{j = 1}^p |\beta_j|
+$$
+
+- Remember to normalize your data! The unit of the data would matter a lot.
+    - The magnitude of the coefficient would be changed
+    - e.g. Distance measured in km or m
+
+
+## LASSO in R
+
+```{r lasso}
+data(QuickStartExample) # from glmnet package
+head(x, 3)
+head(y)
+fit <- glmnet(x, y) # Fit the GLM with LASSO
+plot(fit)
+coef(fit, s = 0.1) # s indicates the lambda value. Every value with a '.' means a 0. 
+```
+
+## Picking $\lambda$: Cross-Validation
+
+```{r lasso-cv}
+cvfit <- cv.glmnet(x, y) # We do not have exact equation to pick lambda. One efficient way of picking lambda is cross-validation. So actually, this is a cross validation (cv) process. The default value for cross might be 5, which is supposed to be checked. 
+plot(cvfit)
+# min lambda
+cvfit$lambda.min
+# coefficients for min lambda
+coef(cvfit, s = "lambda.min")
+# residuals for min lambda (This might be useful for homework to get residuals)
+resids <- y - predict(cvfit, newx = x, s = "lambda.min")
+plot(y, resids)
+```
+
+
+## Cheer for experiences
+
+Different histone marks are enriched in different elements of the genome
+and have different effect on gene expression. In this homework, we want
+to look at the K562 cell line with gene expression data and ChIP-seq
+profiles of 10 different histone marks: H3K4me1, H3K4me2, H3K4me3,
+H3K9me3, H3K9ac, H3K27me3, H3K27ac, H3K79me2, H3K36me3, H4K20me1. The
+gene expression data for each RefSeq transcript is summarized in a file
+called `data/k562expr.txt`.
+
+For each histone mark ChIP-seq data, we already parsed out the following
+read counts for each RefSeq sequence (in the file
+`data/histone_marks_read_count_table.txt`): 
+
+1). distal promoter [-5KB, -1KB] from transcription start site (TSS), 
+2). proximal promoter [-1kb, +1kb] from TSS,
+3). gene body (from transcription start to end, including all exons and introns), 
+4). transcript (concatenate all the exons), 
+5). first 1/3 of transcript (concatenate all the exons, length-wise), 
+6). middle 1/3 of transcript, 
+7). last 1/3 of transcript, 
+8). all the introns (concatenate all the introns). 
+
+The table has one line for each RefSeq, and 64 columns (RefSeq
+ID, 8 histone marks, each with 8 features, so 8 * 8), the value is
+log read count for each feature.
+
+
+## Q1. For Both:
+
+Write a quick python script to filter out RefSeq that have only histone mark or expression data available but not both. 
+
+```{r p2q1,eval=FALSE}
+# your python code here
+```
+
+## Q2. For Graduate Student:
+
+Based on the histone mark count table, do you see enrichment of some histone marks on the different parts of genes? 
+
+
+## Q3. For both: 
+
+Run linear regression on the log read count for each of the histone mark features (one of 64 columns) with gene expression. List those histone mark features statistically correlated with gene expression. Which feature is the most positively correlated with gene expression? Which is the most negatively correlated? Do you need multiple hypothesis correction? 
+
+```{r p2q3}
+# your code here
+
+# Step 1: Read in histone mark features and gene expression data.
+GenExp <- read.table("./data/GMexpr.txt", header = TRUE)
+HisExp <- read.table("./data/histone_marks_read_count_table.txt", header=TRUE)
+
+# Merge X and Y for regression
+HisExp$refseq_id = rownames(HisExp)
+LnData <- merge(GenExp, HisExp, by = "refseq_id" ) 
+
+# Do log transformation on X matrix
+# May add a very tiny number to each item within the counting table
+
+# Write a function to extract p-value from a linear model. 
+lmp <- function (ml) {
+    f <- summary(ml)$fstatistic
+    p <- pf(f[1],f[2],f[3],lower.tail=FALSE)
+    return(p)
+}
+
+# Create empty vector to store the calculation results of p-value and correlation.
+Histone <- colnames(LnData[,3:66])
+P <- vector(mode="numeric", length = 0)
+Coefficient <- vector(mode="numeric", length = 0)
+Correlation <- vector(mode="numeric", length = 0)
+
+# Perform linear regression across 80 histone marks. 
+Y <- LnData$expr
+for(i in 3:66){
+  X <- LnData[,i]
+  m <- lm(Y~X)
+  P = c(P, lmp(m))
+  Coefficient = c(Coefficient, coefficients(m)[2])
+  Correlation = c(Correlation, cor(Y, X))
+}
+ResultLinear <- data.frame(Histone, P, Coefficient, Correlation)
+
+# Substract statistically significant correlated features.
+SigResult <- subset(ResultLinear, ResultLinear$P < 0.00078125)
+NonSigResult <- subset(ResultLinear, ResultLinear$P >= 0.00078125)
+# Print non-significant correlated features
+print(NonSigResult$Histone)
+
+# Print most positively and negatively correlated histone features.
+print(SigResult[SigResult$Correlation == max(SigResult$Correlation),])
+print(SigResult[SigResult$Correlation == min(SigResult$Correlation),])
+
+```
+
+
+## Q4. For both: 
+
+Draw a PCA plot of the different columns in the count table. How does features in the PCA correspond to the significant correlated features in Q3. 
+
+```{r p2q4}
+##  your code here
+```
+
+
+## Q5. For Graduate Students: 
+
+Compare the regression results, if you use raw read count, log count, square root of read count of the histone marks, and see which one gives the best regression to expression. Can you speculate why?
+
+```{r p2q5}
+# your code here
+```
+
+
+## Q6. For Graduate Students: 
+
+Since different transcripts have different length, the read count table might need to be normalized by the gene body, total transcript, total total intron lengths (note distal promoter is always 4KB and proximal promoter is always 2KB. Try to normalize each read count column by region length. How does that change the results in Q4? 
+
+```{r p2q6}
+# your code here
+```
+
+## Next
+
+we want to select a small subset of histone mark features that best recapitulates gene expression. For feature selection, we use glmnet from: 
+http://cran.r-project.org/web/packages/glmnet/index.html
+
+
+## Q7. For both: 
+
+Run LASSO regression to select the most informative histone mark features of gene expression. How many features are selected and what are these? List the strongest 5 factors. 
+
+```{r p2q7}
+# your code here
+LassoData <- data.matrix(LnData)
+fit <- glmnet(LassoData[,3:66], LnData$expr)
+plot(fit)
+coeff = coef(fit, s = 0.0002361792) # This lambda is calculated from question 8.
+# Now we print the features selected by LASSO
+print(colnames(LnData)[coeff@i[-1]+2])
+```
+
+
+## Q8. For both: 
+
+Do a 3-fold cross validation to see how good are the histone mark features selected by LASSO are at predicting gene expression in the training and testing data? 
+
+```{r p2q8}
+# your code here
+cvfit <- cv.glmnet(LassoData[,3:66], LnData$expr, nfolds = 3) 
+ 
+plot(cvfit)
+# min lambda
+cvfit$lambda.min
+
+# coefficients for min lambda
+coef(cvfit, s = "lambda.min")
+```
+
+## Q9. For Graduate students: 
+
+Based on your LASSO model, how well does histone marks predict gene expression? Plot the residual between the predicted gene expression (from histone marks) and the actual gene expression (Y axis) along different gene expression level (X axis)? Does the residual look normally distributed along the gene expression level? Can you guess why? Hints: http://liulab.dfci.harvard.edu/publications/NucleicAcidsRes12_6414.pdf 
+
+```{r p2q9}
+# your code here
+```
+
+## Rules for submitting the homework:
+
+Please submit your solution directly on the canvas website. Please
+provide both your code in this Rmd document and an html file for your
+final write-up. Please pay attention to the clarity and cleanness of
+your homework.
+
+The teaching fellows will grade your homework and give the grades with
+feedback through canvas within one week after the due date. Some of the
+questions might not have a unique or optimal solution. TFs will grade
+those according to your creativity and effort on exploration, especially
+in the graduate-level questions.
+
+## Acknowledgement
+- Dr. X. Shirley Liu
+- Dr. Changxing Wan
+- Andy Shi
+
+
+## Good Luck!
+- Office hour until 7:00 pm for Tuesday
+- Office hour until 8:00 pm for Thursday
+- Additional office hour on each Friday 11:30 am - 12:30 pm @ HSPH Building 2 Room 428
+

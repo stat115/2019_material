@@ -1,0 +1,434 @@
+---
+title: "Stat 115 Lab 9"
+subtitle: "HMM, TCGA"
+author: "Yushi Tang"
+date: "April 2/4, 2019"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center")
+```
+
+
+## Anouncements
+
+- Final exam time and location
+- HW5 is due on April 14, 2019 @ 11:59 pm
+- Additional office hour on each Friday 11:30 am - 12:30 pm @ HSPH Building 2 Room 428
+
+
+## Outline
+
+- Hidden Markov Model
+    - Example
+    - Cheer for experiences
+- TCGA
+    - Overview of TCGA database
+    - Access data from TCGA
+    - Tumor subtype analysis
+    - Expression Data: Clustering and PCA
+
+
+
+## Install and Load Packages
+
+```{r install, eval = FALSE, warning = FALSE, message = FALSE}
+install.packages("HMM")
+```
+
+```{r libraries, warning = FALSE, message = FALSE}
+library(HMM)
+```
+
+## Hidden Markov Model Description
+
+![](https://upload.wikimedia.org/wikipedia/commons/thumb/4/43/HMMGraph.svg/623px-HMMGraph.svg.png)
+
+## All in One Table
+|Algorithm|$t_1$|$t_2$|$t_3$|
+|---------|-----|-----|-----|
+|Forward  |$\alpha_1$(C)|$\alpha_2$(C)|$\alpha_3$(C)|
+|         |$\alpha_1$(N)|$\alpha_2$(N)|$\alpha_3$(N)|
+|Backward |$\beta_1$(C)|$\beta_2$(C)|$\beta_3$(C)|
+|         |$\beta_1$(N)|$\beta_2$(N)|$\beta_3$(N)|
+|Forward- |$\gamma_1$(C)|$\gamma_2$(C)|$\gamma_3$(C)|
+|backward |$\gamma_1$(N)|$\gamma_2$(N)|$\gamma_3$(N)|
+
+
+## Fitting it in R: Setup
+
+- To begin with, we set up the baseline number of HMM.
+
+```{r hmm-setup}
+#  First, we define initial probabilit as:
+#  If it is rany, what is the probability of go shopping
+startProbs <- c(0.6, 0.4)
+
+#  Then, define the transition probability, where as:
+#  P(Rainy to Rainy) = 0.7, P(Rainy to Sunny) = 0.3, 
+#  P(Sunny to Rainy) = 0.4, P(Sunny to Sunny) = 0.6.
+transProbs <- matrix(c(0.7, 0.3, 0.4, 0.6), nrow = 2)
+
+#  Now, define emission probability with the order "Walk, Shop, Clean" as:
+#  Trans probability of changing from rainy to sunny
+emmissionProbs <- matrix(c(0.1, 0.6, 0.4, 0.3, 0.5, 0.1), nrow = 2)
+
+#  Prepare basic data structure
+hmm <- initHMM(c("Rainy","Sunny"), c("Walk","Shop", "Clean"),
+               startProbs, transProbs, emmissionProbs)
+print(hmm)
+
+#  Sequence of observations
+observations = c("Clean", "Shop", "Walk")
+```
+
+## Fitting it in R: Forward-Backward
+
+- Forward ($\alpha$): Pr(state at time k is X, and observe obs 1 to k)
+```{r}
+# Return the probability on the log scale, so we need to take exp. 
+exp(forward(hmm, observations)) 
+```
+
+- Backward: At time k, Pr(observe obs k+1 to end | state is X)
+```{r}
+ # Again, return the probability on the log scale, so we need to take exp.
+exp(backward(hmm, observations)) 
+```
+
+- Posterior: P(state at time k is X | all observations)
+
+```{r}
+posterior(hmm, observations)
+```
+
+## Viterbi
+
+- Most likely path
+- Takes into account dependency between states
+
+```{r viterbi}
+viterbi(hmm, observations)
+```
+
+
+## Cheer for Experiences
+
+CpG islands are stretches of CG-rich sequences in the genome. They are
+often of functional importance, as 50% of the human genes have a CpG
+island around 500bp upstream of the transcription start site. Of course,
+CpG island sequences are not only CG's, and non-CpG island sequences could
+still contain some CG's. Therefore, we could use HMMs to predict CpG
+islands by looking at a long stretch of DNA. Now as a HMM practice, we
+just have a short sequence AGGCGT.
+
+The parameters of the HMM model are:
+Initial probability: 0.4 of CpG (abbreviated as C) and 0.6 of non-CpG (abbreviated as N).
+Transition probability: $P$(CpG to CpG) = 0.7, $P$(non-CpG to non-CpG) = 0.6.
+Emission probability: $P$(A, C, G, T | CpG) = (0.1, 0.4, 0.4, 0.1), $P$(A, C, G, T | non-CpG) = (0.3, 0.2, 0.2, 0.3).
+
+## All in One Table
+
+|Algorithm|$t_1$|$t_2$|$t_3$|$t_4$|$t_5$|$t_6$|
+|---------|-----|-----|-----|-----|-----|-----|
+|Forward  |$\alpha_1$(C)|$\alpha_2$(C)|$\alpha_3$(C)|$\alpha_4$(C)|$\alpha_5$(C)|$\alpha_6$(C)|
+|         |$\alpha_1$(N)|$\alpha_2$(N)|$\alpha_3$(N)|$\alpha_4$(N)|$\alpha_5$(N)|$\alpha_6$(N)|
+|Backward |$\beta_1$(C)|$\beta_2$(C)|$\beta_3$(C)|$\beta_4$(C)|$\beta_5$(C)|$\beta_6$(C)|
+|         |$\beta_1$(N)|$\beta_2$(N)|$\beta_3$(N)|$\beta_4$(N)|$\beta_5$(N)|$\beta_6$(N)|
+|Forward- |$\gamma_1$(C)|$\gamma_2$(C)|$\gamma_3$(C)|$\gamma_4$(C)|$\gamma_5$(C)|$\gamma_6$(C)|
+|backward |$\gamma_1$(N)|$\gamma_2$(N)|$\gamma_3$(N)|$\gamma_4$(N)|$\gamma_5$(N)|$\gamma_6$(N)|
+
+
+## Forward-backward procedure
+-  Given that the observation string is AGGCGT
+-  Step 1: Forward Procedure
+
+```{r fwd}
+alphaC1 = 0.4 * 0.1
+alphaN1 = 0.6 * 0.3
+
+alphaC2 = (alphaC1 * 0.7 + alphaN1 * 0.4) * 0.4
+alphaN2 = (alphaC1 * 0.3 + alphaN1 * 0.6) * 0.2
+
+alphaC3 = (alphaC2 * 0.7 + alphaN2 * 0.4) * 0.4
+alphaN3 = (alphaC2 * 0.3 + alphaN2 * 0.6) * 0.2
+
+alphaC4 = (alphaC3 * 0.7 + alphaN3 * 0.4) * 0.4
+alphaN4 = (alphaC3 * 0.3 + alphaN3 * 0.6) * 0.2
+
+alphaC5 = (alphaC4 * 0.7 + alphaN4 * 0.4) * 0.4
+alphaN5 = (alphaC4 * 0.3 + alphaN4 * 0.6) * 0.2
+
+alphaC6 = (alphaC5 * 0.7 + alphaN5 * 0.4) * 0.1
+alphaN6 = (alphaC5 * 0.3 + alphaN5 * 0.6) * 0.3
+
+#  Print every alpha
+(alpha_set_C = c(alphaC1, alphaC2, alphaC3, alphaC4, alphaC5, alphaC6))
+
+(alpha_set_N = c(alphaN1, alphaN2, alphaN3, alphaN4, alphaN5, alphaN6))
+```
+
+
+-  Step 2: Backward Procedure
+```{r bkwd}
+betaC6 = 1
+betaN6 = 1
+
+betaC5 = 0.7 * 0.1 * betaC6 + 0.3 * 0.3 * betaN6
+betaN5 = 0.4 * 0.1 * betaC6 + 0.6 * 0.3 * betaN6
+
+betaC4 = 0.7 * 0.4 * betaC5 + 0.3 * 0.2 * betaN5
+betaN4 = 0.4 * 0.4 * betaC5 + 0.6 * 0.2 * betaN5
+
+betaC3 = 0.7 * 0.4 * betaC4 + 0.3 * 0.2 * betaN4
+betaN3 = 0.4 * 0.4 * betaC4 + 0.6 * 0.2 * betaN4
+
+betaC2 = 0.7 * 0.4 * betaC3 + 0.3 * 0.2 * betaN3
+betaN2 = 0.4 * 0.4 * betaC3 + 0.6 * 0.2 * betaN3
+
+betaC1 = 0.7 * 0.4 * betaC2 + 0.3 * 0.2 * betaN2
+betaN1 = 0.4 * 0.4 * betaC2 + 0.6 * 0.2 * betaN2
+
+#  Print every beta
+(beta_set_C = c(betaC1, betaC2, betaC3, betaC4, betaC5, betaC6))
+
+(beta_set_N = c(betaN1, betaN2, betaN3, betaN4, betaN5, betaN6))
+```
+
+
+-  Step 3: Check the equality of the termination values
+```{r s3}
+(termination_alpha = alphaC6 + alphaN6)
+
+(termination_beta = 0.4 * 0.1 * betaC1 + 0.6 * 0.3 * betaN1)
+
+termination_alpha == termination_beta
+```
+
+-  Step 4: Calculate gamma score
+```{r s4}
+gammaC1 = (alphaC1 * betaC1) / (alphaC1 * betaC1 + alphaN1 * betaN1)
+gammaC2 = (alphaC2 * betaC2) / (alphaC2 * betaC2 + alphaN2 * betaN2)
+gammaC3 = (alphaC3 * betaC3) / (alphaC3 * betaC3 + alphaN3 * betaN3)
+gammaC4 = (alphaC4 * betaC4) / (alphaC4 * betaC4 + alphaN4 * betaN4)
+gammaC5 = (alphaC5 * betaC5) / (alphaC5 * betaC5 + alphaN5 * betaN5)
+gammaC6 = (alphaC6 * betaC6) / (alphaC6 * betaC6 + alphaN6 * betaN6)
+```
+
+-  Step 5: Print the probability of choose C as path 
+```{r s5}
+(path_C = c(gammaC1, gammaC2, gammaC3, gammaC4, gammaC5, gammaC6))
+#   Now we print the path
+(path = ifelse( path_C < 0.5, 'N', 'C'))
+```
+
+## Implementing Viterbi Algorithm
+-  Step 1: Initiation
+```{r viterbi_s1}
+sigmaC1 = 0.4 * 0.1
+sigmaN1 = 0.6 * 0.3
+psiC1 = 0
+psiN1 = 0
+```
+
+-  Step 2: Recursion
+```{r viterbi_s2}
+sigmaC2 = ( max(sigmaC1 * 0.7, sigmaN1 * 0.4) * 0.4)
+sigmaN2 = ( max(sigmaN1 * 0.6, sigmaC1 * 0.3) * 0.2)
+
+sigmaC3 = ( max(sigmaC2 * 0.7, sigmaN2 * 0.4) * 0.4)
+sigmaN3 = ( max(sigmaN2 * 0.6, sigmaC2 * 0.3) * 0.2)
+
+sigmaC4 = ( max(sigmaC3 * 0.7, sigmaN3 * 0.4) * 0.4)
+sigmaN4 = ( max(sigmaN3 * 0.6, sigmaC3 * 0.3) * 0.2)
+
+sigmaC5 = ( max(sigmaC4 * 0.7, sigmaN4 * 0.4) * 0.4)
+sigmaN5 = ( max(sigmaN4 * 0.6, sigmaC4 * 0.3) * 0.2)
+
+sigmaC6 = ( max(sigmaC5 * 0.7, sigmaN5 * 0.4) * 0.1)
+sigmaN6 = ( max(sigmaN5 * 0.6, sigmaC5 * 0.3) * 0.3)
+
+psiC2 = ifelse( (sigmaC1 * 0.7) > (sigmaN1 * 0.4), 'C', 'N' )
+psiN2 = ifelse( (sigmaN1 * 0.6) > (sigmaC1 * 0.3), 'N', 'C' )
+
+psiC3 = ifelse( (sigmaC2 * 0.7) > (sigmaN2 * 0.4), 'C', 'N' )
+psiN3 = ifelse( (sigmaN2 * 0.6) > (sigmaC2 * 0.3), 'N', 'C' )
+
+psiC4 = ifelse( (sigmaC3 * 0.7) > (sigmaN3 * 0.4), 'C', 'N' )
+psiN4 = ifelse( (sigmaN3 * 0.6) > (sigmaC3 * 0.3), 'N', 'C' )
+
+psiC5 = ifelse( (sigmaC4 * 0.7) > (sigmaN4 * 0.4), 'C', 'N' )
+psiN5 = ifelse( (sigmaN4 * 0.6) > (sigmaC4 * 0.3), 'N', 'C' )
+
+psiC6 = ifelse( (sigmaC5 * 0.7) > (sigmaN5 * 0.4), 'C', 'N' )
+psiN6 = ifelse( (sigmaN5 * 0.6) > (sigmaC5 * 0.3), 'N', 'C' )
+```
+
+-  Step 3: Termination
+
+```{r viterbi_s3}
+q_star6 = ifelse( sigmaC6 > sigmaN6, 'C', 'N')
+```
+
+-  Step 4: Path backtracking
+```{r viterbi_s4}
+q_star5 = ifelse( q_star6 == 'C', psiC6, psiN6)
+q_star4 = ifelse( q_star5 == 'C', psiC5, psiN6)
+q_star3 = ifelse( q_star4 == 'C', psiC4, psiN4)
+q_star2 = ifelse( q_star3 == 'C', psiC3, psiN3)
+q_star1 = ifelse( q_star2 == 'C', psiC2, psiN2)
+
+##  Now we print the path
+(path_viterbi = c(q_star1, q_star2, q_star3, q_star4, q_star5, q_star6))
+```
+
+
+## Part II: The Cancer Genome Atlas (TCGA)
+- Overview of TCGA database
+- Access data from TCGA
+- Tumor subtype analysis
+- Expression Data: Clustering and PCA
+
+## TCGA Website
+- TCGA's website contains raw data that you can download
+- Should be fairly straightforward, involves searching on the
+  provided website.
+
+## Broad Firehose
+- Contains processed data that you can download and analyze
+- Access using firebrowse
+- R API: FirebrowseR
+- Code adapted from FirebrowseR vignette:
+  [https://github.com/mariodeng/FirebrowseR](https://github.com/mariodeng/FirebrowseR)
+- Let's download all breast cancer patients' clinical data.
+
+
+```{r, eval=FALSE, warning = FALSE, message = FALSE}
+# Install required packages
+source("https://bioconductor.org/biocLite.R")
+biocLite("limma")
+biocLite("bladderbatch")
+biocLite("sva")
+install.packages("devtools")
+library(devtools)
+devtools::install_github("mariodeng/FirebrowseR")
+```
+
+
+```{r libraries_p2, warning = FALSE, message = FALSE}
+# Library riquired packages
+library(FirebrowseR)
+library(bladderbatch)
+library(limma)
+library(sva)
+library(dplyr)
+library(glmnet)
+library(ggplot2)
+```
+
+
+```{r firebrowser}
+# download all available cohorts
+cohorts <- Metadata.Cohorts(format = "csv")
+# show what cohorts are available
+cohorts
+
+# have to do this because we can only receive 150 patients at a time
+all.Received <- FALSE
+page.Counter <- 1
+page.size <- 150
+brca_pats <- list()
+while(all.Received == FALSE) {
+    brca_pats[[page.Counter]] <- Samples.Clinical(format = "csv",
+            cohort = "BRCA", page_size = page.size, page = page.Counter)
+    if(page.Counter > 1) {
+        colnames(brca_pats[[page.Counter]]) <-
+            colnames(brca_pats[[page.Counter-1]])
+    }
+
+    if(nrow(brca_pats[[page.Counter]]) < page.size) {
+        all.Received = TRUE
+    } else {
+        page.Counter = page.Counter + 1
+    }
+}
+
+brca_pats <- do.call(rbind, brca_pats)
+dim(brca_pats)
+```
+
+Now, can you find out how many are alive? How about the mean and median
+age at initial diagnosis? Can you plot a histogram of the age at initial
+diagnosis?
+
+```{r firebrowser-student}
+table(brca_pats$vital_status)
+mean(brca_pats$age_at_initial_pathologic_diagnosis)
+median(brca_pats$age_at_initial_pathologic_diagnosis)
+hist(brca_pats$age_at_initial_pathologic_diagnosis)
+```
+
+## Tumor Subtype Analysis
+- Using LIMMA to find differentially expressed genes. Please review Lab 2.
+- You can assume that we have already performed normalization (RMA) and
+  batch effect removal (ComBat), so you can jump right in to using
+  LIMMA.
+
+## Expression Data: Clustering and PCA
+
+Task: using the bladder batch data, can you perform kmeans
+clustering (try $k = 2$ for now) on differentially expressed genes (FDR
+$< 0.05$ and log2-fold-change $> 2$), and then plot the result on a PCA
+plot, with the color of each point denoting its cluster and the shape
+denoting its cancer status?
+
+```{r part2-demo}
+set.seed(282215115)
+# I am running ComBat because this data has batch effect, but you don't
+# need this for your HW
+data(bladderdata)
+pheno <- pData(bladderEset)
+pheno$hasCancer <- as.numeric(pheno$cancer == "Cancer")
+edata <- exprs(bladderEset)
+model <- model.matrix(~hasCancer, data = pheno)
+combat_edata <- ComBat(dat = edata, batch = pheno$batch, mod = model)
+
+# run LIMMA to get the top genes (use data after running ComBat)
+fit <- lmFit(combat_edata, model)
+fit <- eBayes(fit)
+topgenes <- topTable(fit, coef = "hasCancer", p.value = 0.05, lfc = 2,
+                     number = Inf)
+
+# run kmeans clustering on top genes
+kmeans_res <- kmeans(t(combat_edata[rownames(topgenes),]),
+                     2, nstart = 10, iter.max = 100)
+
+# In the homework, we are supposed to use k.means as 3
+# PCA is just plotting, but kmeans is actually doing the cluster tasks. 
+
+# run PCA
+pca_raw <- prcomp(t(combat_edata), center = TRUE, scale. = TRUE)
+
+# assemble the data
+edata_pc_df <- as.data.frame(pca_raw$x)
+edata_pc_df$cluster <- as.factor(kmeans_res$cluster)
+edata_pc_df$hasCancer <- as.factor(pheno$hasCancer)
+
+# draw the plot
+ggplot(edata_pc_df, aes(x = PC1, y = PC2, color = cluster, shape =
+                        hasCancer)) + geom_point()
+```
+
+
+## Acknowledgement
+- Dr. X. Shirley Liu
+- Dr. Changxing Wan
+- Andy Shi
+
+
+## Good Luck!
+- Office hour until 7:00 pm for Tuesday
+- Office hour until 8:00 pm for Thursday
+- Additional office hour on each Friday 11:30 am - 12:30 pm @ HSPH Building 2 Room 428
+

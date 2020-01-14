@@ -1,0 +1,506 @@
+---
+title: "Stat 115 Lab 6"
+subtitle: "Single Cell RNA-seq Analysis"
+author: "Yushi Tang"
+date: "March 5/7, 2019"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center")
+```
+
+## Anouncements
+
+- Additional office hour on Friday 11:30 am - 12:30 pm @ HSPH Building 2 Room 428
+- Please double check you have access to Odyssey and /n/stat115/. You will need it for homework 3, 4, and 5 (due 3/4). Please shoot me an email if you are not blessed with access to that.
+
+## Outline
+
+- Odyssey Fest
+    - Odyssey storage characteristics
+    - How to save large dataset 
+- Seurat
+- Cheer for Experiences
+
+
+## Odyssey Fest
+- Odyssey storage characteristics
+- How to store large files appropriately on Odyssey
+
+```{r odyssey,engine='bash',eval=FALSE}
+lfs setstripe -c 18 -S 4m /path/to/files
+```
+
+## Seurat: Data Analysis
+For this exercise, we will be analyzing a single cell RNA-Seq dataset of Peripheral Blood Mononuclear Cells (PBMC) from the 10X Genomics platform. We will primarily be using the seurat package from the Satija Lab (http://satijalab.org/seurat/pbmc-tutorial.html). The purpose of single cell RNA-Seq analysis is to uncover interesting biology that occurs at a granularity--the single cell--that isn't appreciated when these features become averaged in bulk. The goal of this analysis is to uncover heterogenity in PBMCs and understanding the analysis workflows for single cell technologies. 
+
+**First, install/load the packages and the data object**
+
+```{r install_package,eval=FALSE}
+# Install required packages
+install.packages('Seurat')
+install.packages('dplyr')
+```
+
+```{r init, cache=FALSE, message=FALSE}
+library(Seurat)
+library(Matrix)
+library(dplyr)
+
+# Load the PBMC dataset
+pbmc <- readRDS("./Data/pbmc.rds")
+
+# View the data structure
+dim(pbmc@raw.data)
+# Number of genes
+nrow(pbmc@raw.data)
+# Print target gene id
+rownames(pbmc@raw.data)[1:10]
+# Number of samples
+ncol(pbmc@raw.data)
+```
+*Note:* to achieve this object, the counts matrix had to be determined using a standard alignment protocol similar to bulk RNA-Seq analyses. The **.rds** object contains a **seurat** object with 2001 samples and 32,643 genes. This sample set includes roughly 1,000 PBMC samples from two different batches.
+
+## Seurat: Understand the data structure
+- Difference between data, raw.data, and scale.data
+- pbmc @ raw.data
+    - The raw data slot represents the original expression matrix.
+    - Row names represent gene names and column names represent cell names. 
+    - A count matrix, with either raw counts or normalized values (i.e. FPKM or TPM)
+    - But the input expression matrix should not be log-transformed.
+    - Positive value
+- pbmc @ data
+    - The data slot stores normalized and log-transformed single cell expression. (?NormalizeData)
+    - This is measurement of relative abundance levels of all genes.
+    - Used for visualizations, such as violin and feature plots (see following slides)
+    - Positive or zero
+- pbmc @ scale.data
+    - The scale data slot represents a cell's relatice expression of each gene, in comparison to all other cells. (?ScaleData)
+    - Used as input for dimensional reduction techniques
+    - Can also be displayed in heatmaps
+    - Either positive or negative
+
+## Seurat: Initialization (Tidy Dataset)
+- The substantial sparsity associated with scRNA-Seq data makes analysis a unique challenge. 
+- Use the 'CreateSeurateObject' command to filter lowly expressed genes and weakly detected cells in this raw dataset. How many samples and genes are filtered afterwards?
+- Here, we only keep genes expressed in >= 3 cells (~0.1% of the data)
+- We also keep all cells with at least 200 detected genes.
+
+```{r Filter, cache=TRUE, message=FALSE, warning = FALSE}
+# Examine the memory savings between regular and sparse matrix
+object.size(as.matrix(pbmc@raw.data))
+object.size(pbmc@raw.data)
+
+pbmc <- CreateSeuratObject(raw.data=pbmc@raw.data,min.cells = 3, min.genes = 200,project = "10X_PBMC")
+dim(pbmc@data)
+dim(pbmc@raw.data)
+
+# Examine the memory savings again
+object.size(as.matrix(pbmc@raw.data))
+object.size(pbmc@raw.data)
+
+```
+
+## Seurat: Quality Control (QC)
+
+-  QC1: Filter cells based on the percentage of mitochondrial genes present
+-  QC2: Fileter out cells as potential multiplets
+    -  Visualize gene and molecule counts
+    -  Plot the relationship
+    -  Exclude cells with a clear outlier number of genes detected as potential multiplets
+   
+When trying to discover rare cell types, one has to be weary of technical confounders that imply heterogenity that are actually false. Two measures of technical confounders are the number of mitochondrial reads mapped as well as the number of unique genes mapped. In this dataset, how many mitochondrial genes are there? How many samples express a number of genes that significantly deviates from the rest? Remove these.
+
+```{r qc, cache=TRUE, results= 'hide', fig.height=7,fig.width=13}
+# The number of genes (nGene) and UMIs (nUMI, unique molecular identifiers) 
+# are automatically calculated. For non-UMI data, nUMI represents the sum of
+# the non-normalized values within a cell. 
+
+# Calculate the percentage of mitochondrial genes as percent.mito 
+# Use raw.data since this represents non-transformed and
+# non-log-normalized counts The % of UMI mapping to MT-genes is a common
+# scRNA-seq QC metric.
+mito.genes <- grep("^MT-", rownames(pbmc@data), value = TRUE)
+length(mito.genes)
+percent.mito <- colSums(pbmc@data[mito.genes, ])/colSums(pbmc@data)
+
+# Adds columns to object@data.info, and is a great place to stash QC stats
+pbmc <- AddMetaData(pbmc, percent.mito, "percent.mito")
+VlnPlot(pbmc, c("percent.mito"), nCol = 1)
+VlnPlot(pbmc, c("nGene", "nUMI", "percent.mito"), nCol = 3)
+
+pbmc <- SubsetData(pbmc, subset.name = "nGene", accept.high = 2500)
+pbmc <- SubsetData(pbmc, subset.name = "percent.mito", accept.high = 0.05)
+
+
+# Use GenePlot to visualize gene-gene relationship
+GenePlot(object = pbmc, gene1 = "nUMI", gene2 = "percent.mito")
+GenePlot(object = pbmc, gene1 = "nUMI", gene2 = "nGene")
+
+
+# Cells that have unique gene counts over 2,500 or less than 200
+# might be filtered out
+pbmc <- FilterCells(object = pbmc, subset.names = c("nGene", "percent.mito"), low.thresholds = c(200, -Inf), high.thresholds = c(2500, 0.05))
+```
+
+## Seurat: Normalization
+- Employ a global-scaling normalization method by default
+- Normalize the gene expression measurements for each cell by the total expression
+- Multiply this by a scale factor (10,000 by default)
+- Log-transforms the result
+
+```{r normalize, message = FALSE, warning = FALSE}
+pbmc <- NormalizeData(object = pbmc, normalization.method = "LogNormalize", scale.factor = 1e4)
+```
+
+
+## Seurat: Detecting variable genes across the single cells
+
+- Calculate the average expression and dispersion for each gene
+- Place these genes into bins
+- Calculates a z-score for dispersion within each bin
+- Parameters here would identify ~2,000 variable genes, and represent typical parameter settings for UMI data that is normalized to a total of 10,000 molecules.
+
+```{r meanVar, message = FALSE, warning = FALSE, fig.keep= FALSE}
+pbmc <- FindVariableGenes(pbmc,mean.function=ExpMean,dispersion.function = LogVMR, x.low.cutoff = 0.0125, x.high.cutoff = 3, y.cutoff = 0.5, do.contour = FALSE)
+length(x = pbmc@var.genes)
+# Print the variable genes' ids
+# These genes would be used as input for linear dimensioinal reduction below (PCA)
+pbmc@var.genes
+```
+
+## Seurat: Removing Unwanted Sources of Variation, Linear Dimensional Reduction
+
+- Unwanted sources of variation:
+    - Technical noise
+    - Batch effects  
+    - Biological sources of variation (cell cycle stage)
+
+Rather than focusing on specific differentially expressed genes, a staple in scRNA-Seq analyses involves dimension reduction. We have already analyzed the mean-variance relationship and discarded outliers. Now we can scale the data and regress out the confounders we looked at earlier. Finally, we'll run PCA based on the information from variable genes deteced before. 
+
+```{r pca, message = FALSE, warning = FALSE, fig.keep= FALSE}
+# For this sample, we regress on the number of detected molecules per cell 
+# and the percentage mitochondrial gene content
+# This step would take several minutes
+pbmc <- ScaleData(pbmc,vars.to.regress = c('nUMI','percent.mito'))
+pbmc <- RunPCA(pbmc, pc.genes = pbmc@var.genes, do.print = FALSE, pcs.print = 5, genes.print = 5)
+```
+
+
+## Seurat: Visualization
+
+Seurat provides several useful ways of visualizing both cells and genes that define the PCA, including **PrintPCA()**, **VizPCA()**, **PCAPlot()**, and **PCHeatmap()**
+
+```{r pca_viz, cache=TRUE}
+# Examine  and visualize PCA results a few different ways
+# Print out genes and cells that define each PCs
+PrintPCA(pbmc, pcs.print = 1:5, genes.print = 5, use.full = FALSE)
+VizPCA(pbmc, 1:2)
+PCAPlot(pbmc, 1, 2)
+```
+
+
+
+
+```{r multi-heatmap,fig.height=12,fig.width=9,cache=TRUE, warning=FALSE}
+# PCHeatmap can be useful 
+PCHeatmap(pbmc, pc.use = 1, cells.use = 500, do.balanced = TRUE,
+          label.columns = TRUE, use.full = FALSE)
+PCHeatmap(pbmc, pc.use = 1:12, cells.use = 500, do.balanced = TRUE,
+          label.columns = FALSE, use.full = FALSE)
+```
+
+
+## Seurat: More Quantifying Methods for Detecting Statistically Significant PCs 
+
+Which principal components are statistically significant? Comment on one or more approaches to determine this.
+-  JackStrawPlot: comparing the distribution of p-values for each PC with a uniform distribution
+-  PCElbowPlot: plot the standard deviations of the PCs
+
+```{r jackstraw_plot,fig.height=6,fig.width=10,cache=TRUE,warning=FALSE}
+# This step would take several minutes
+pbmc <- JackStraw(object = pbmc, num.replicate = 100, display.progress = FALSE)
+JackStrawPlot(object = pbmc, PCs = 1:12)
+```
+
+
+```{r elbow_plot,fig.height=6,fig.width=10,cache=TRUE,warning=FALSE}
+PCElbowPlot(pbmc)
+```
+A more ad hoc method for determining which PCs to use is to look at a plot of the standard deviations of the principle components and draw your cutoff where there is a clear elbow in the graph. This can be done with **PCElbowPlot()**. In this example, it looks like the elbow would fall around PC 9.
+
+
+## Seurat: Clustering
+Use the FindClusters command to determine sample modules in the PBMC data. Comment on the type of clustering performed. Is it supervised or unsupervised?
+```{r cluster,fig.height=5,fig.width=7,cache=TRUE}
+pbmc <- FindClusters(object = pbmc, reduction.type = "pca", dims.use = 1:10, 
+    resolution = 0.6, print.output = 0, save.SNN = TRUE)
+# save.SNN = T saves the SNN so that the clustering algorithm can be rerun
+# using the same graph but with a different resolution value 
+```
+Details are in the Seurat source code as well as several paragraphs in the vignette. It is supervised. 
+
+
+## Seurat: Non-linear Dimensional Reduction: tSNE
+A popular method for displaying scRNA-Seq data is by creating two dimensions using tSNE (t-distributed stochastic neighbor embedding). Run and visualize tSNE for this data. Comment on how this approach is different than PCA.
+
+```{r tsne, fig.height=5, fig.width=7, cache=TRUE, message=FALSE, warnings=FALSE}
+set.seed(115) # However, the distance between two points would not be changed.
+pbmc <- RunTSNE(pbmc, dims.use = 1:10, do.fast = TRUE)
+```
+
+```{r tsneplot,fig.height=5,fig.width=7,cache=TRUE}
+TSNEPlot(pbmc,do.label = TRUE)
+```
+*Note:* tSNE is, by definition, a stochastic process so be sure to cache your data at this point or save the file image before re-running later steps! 
+Main difference is linear/non linear effects; tSNE in this case is using the PCs as input
+
+## Seurat: Differentially expressed genes (cluster biomarkers)
+Now that we've defined data-driven clusters, we'd like to identify markers that define clusters via differential expression. What markers distinguish cluster 2? What markers distinguish cluster 2 from cluster 4? Every cluster from all others.
+
+```{r markers1,fig.height=8,fig.width=15,cache=TRUE, warning=FALSE}
+# find all markers of cluster 2
+cluster2.markers <- FindMarkers(pbmc, ident.1 = 2, min.pct = 0.25)
+print(head(cluster2.markers, 5))
+
+# find all markers distinguishing cluster 2 from clusters 4
+cluster24.markers <- FindMarkers(pbmc, ident.1 = 2, ident.2 = 4, min.pct = 0.25)
+print(head(cluster24.markers, 5))
+
+# find all markers distinguishing cluster 2 from clusters 1 and 4
+cluster2_14.markers <- FindMarkers(pbmc, ident.1 = 2, ident.2 = c(1,4) , min.pct = 0.25)
+print(head(cluster2_14.markers, 5))
+
+# find markers for every cluster compared to all remaining cells, report
+# only the positive ones
+pbmc.markers <- FindAllMarkers(pbmc, only.pos = TRUE, min.pct = 0.25, thresh.use = 0.25)
+pbmc.markers %>% group_by(cluster) %>% top_n(2, avg_logFC) -> pbmc.markers.top2
+pbmc.markers.top2
+FeaturePlot(object = pbmc, features.plot = pbmc.markers.top2$gene, cols.use = c("grey", "blue"), reduction.use = "tsne", nCol = 4)
+```
+
+## Seurat: Differentially expressed genes (cluster biomarkers)
+Using the biomarkers identified above, select a few markers to distinguish the various subgroups. Try plotting different measurements, including raw and normalized counts on/not on the log scale.
+
+```{r markerplots,fig.height=8,fig.width=15,cache=TRUE}
+VlnPlot(pbmc, c("CD79A","LST1"))
+VlnPlot(pbmc, c("CD79A","LST1"), use.raw = TRUE, y.log = TRUE)
+```
+
+We can also generate an expression heatmap for given cells and genes.
+
+```{r marker_heatmap,fig.height=8,fig.width=15,cache=TRUE}
+# Plot the top 10 markers for each cluster
+top10 <- pbmc.markers %>% group_by(cluster) %>% top_n(10, avg_logFC)
+DoHeatmap(object = pbmc, genes.use = top10$gene, slim.col.label = TRUE, remove.key = TRUE)
+```
+
+
+## Seurat: Differentially expressed genes (cluster biomarkers)
+Using the table below, identify which clusters correspond to which cell subtypes in your tSNE projection. Do you observe any rare populations or mixed populations? Explore some other markers to characterize the behavior of these populations.
+
+Cluster ID | Markers       | Cell Type
+-----------|---------------|----------
+?          | IL7R          | CD4 T cells
+?          | CD14, LYZ     | CD14+ Monocytes
+?          | MS4A1         | B cells
+?          | CD8A          | CD8 T cells
+?          | FCGR3A, MS4A7 | FCGR3A+ Monocytes
+?          | GNLY, NKG7    | NK cells
+?          | FCER1A, CST3  | Dendritic Cells
+?          | PPBP          | Megakaryocytes
+
+```{r featureplot2,fig.height=8,fig.width=15,cache=TRUE, warning=FALSE}
+FeaturePlot(object = pbmc, features.plot = pbmc.markers.top2$gene, cols.use = c("grey", "blue"), reduction.use = "tsne", nCol = 4)
+```
+
+## Seurat: Differentially expressed genes (cluster biomarkers)
+Using the inference above, annotate your tSNE with the cell type names.
+
+```{r labelplot,fig.height=5,fig.width=9,cache=FALSE, warning = FALSE}
+current.cluster.ids <- c(0, 1, 2, 3, 4, 5, 6, 7)
+new.cluster.ids <- c("CD4 T cells", "CD14+ Monocytes", "B cells",
+                     "CD8 T cells", "FCGR3A+ Monocytes", "NK cells",
+                     "Dendritic cells", "Megakaryocytes")
+pbmc@ident <- plyr::mapvalues(pbmc@ident, from = current.cluster.ids, to = new.cluster.ids)
+TSNEPlot(pbmc, do.label = TRUE, pt.size = 0.5)
+```
+
+
+
+## Cheer for Experiences
+
+Singel cell RNA-seq
+
+For this exercise, we will be analyzing a single cell RNA-Seq dataset of human peripheral blood mononuclear cells (PBMC) from the 10X Genomics platform. There are 2,700 single cells that were sequenced on the Illumina NextSeq 500. The raw data can be found at: https://support.10xgenomics.com/single-cell/datasets/.
+
+## Question 1:
+
+1. Read the 10X data and create a Seurat (Butler et al., Nature Biotechnology 2018) Object. Describe the composition of the raw dataset (i.e. number of genes, number of samples, and dropout rate). 
+
+```{r q1,eval = FALSE}
+library(Seurat)
+library(dplyr)
+pbmc.data <- Read10X(data.dir = "./Data/filtered_gene_bc_matrices/hg19/")
+# Print number of genes
+# Print number of samples
+# Calculate the dropout rate: count all 0 in pbmc.data, divided by ncol*crow
+```
+
+## Question 2:
+
+2. We want to filter cells with very few detected genes and genes that are detected in very few cells. Let’s keep all genes expressed in >= 3 cells, and all cells with >= 200 detected genes. How do these summary statistics change after filtering?
+
+```{r q2,eval = FALSE}
+#Hint: CreateSeuratObject
+# Compare number of genes
+# Compare number of samples
+# Compare the dropout rate: count all 0 in pbmc.data, divided by ncol*crow
+pbmc.data.temp <- CreateSeuratObject(raw.data=pbmc.data,min.cells = 3, min.genes = 200,project = "10X_PBMC")
+```
+
+## Question 3:
+
+3. Next we will filter cells with high proportion of mitochondrial reads (potential dead cells) or outlier number of genes (potential multiplets). What is the distribution of number of genes and UMIs in your dataset? What proportion of the counts from your filtered dataset map to mitochondrial genes? Remove those cells with high mitochondrial rate (>5%). Cells with extremely high gene coverage could also be outliers thus should be removed. The cutoff depends on the scRNA-seq technology and the distribution of each dataset. For this data, let’s filter cells with > 2500 covered genes.
+
+```{r q3,eval = FALSE}
+# All commands are on the QC slides
+mito.genes <- grep(pattern = "^MT-", x = rownames(x = pbmc@data), value = TRUE)
+mito.total <- sum(pbmc@raw.data[mito.genes, ])/sum(pbmc@raw.data)
+mito.percent <- Matrix::colSums(pbmc@raw.data[mito.genes, ])/Matrix::colSums(pbmc@raw.data)
+pbmc <- AddMetaData(object = pbmc, metadata = mito.percent , col.name = "percent.mito")
+
+# Display the violin plot of nGene, nUMI, percent.mito after all these QC procedure
+VlnPlot(object = pbmc, features.plot = c("nGene", "nUMI", "percent.mito"), nCol = 3)
+
+# Use FilterCells command to filter cells with extremely high coverage
+```
+
+## Question 4:
+
+4. Use global-scaling normalization method in Seurat with the scaling factor 10000, so all the cells will be normalized to have the same sequencing depth to 10K. Use the Seurat function "FindVariableGenes" to select the genes showing expression variability, then perform PCA on these genes. Provide summary plots, statistics, and tables to show 1) how many variable genes are used in the PCA analysis, 2) how many PCs are statistically significant, 3) which genes contribute to each of the significant PCs, and 4) how much variability is explained in each of the significant PCs.
+
+```{r q4,eval = FALSE}
+# Normalize the data: NormalizeData
+# Detect variable genes: FindVariableGenes
+# Print number of variable genes
+# Removing unwanted variances: ScaleData with nUMI, percent.mito
+# Linear reduction: RunPCA
+# Detect significant PCs: JackStraw, JackStrawPlot, PrintPCA, PCElbowPlot
+# Calculate the explained variances
+eigenvals <- (pbmc@dr$pca@sdev)^2
+var.explained <- cumsum(eigenvals) / sum(eigenvals)
+var.explained[11]
+```
+
+## Question 5:
+
+5. For GRADUATE students: Sometimes scRNA-seq data might have significant PCs that are heavily weighted by cell cycle genes, which need to be removed before downstream analyses. Check the top PCs in this data to see whether cell cycle components need to be removed. Provide plots and other quantitative arguments to support your case. 
+
+```{r q5,eval = FALSE}
+pbmc.cellcycle <- CellCycleScoring(
+      object = pbmc,
+      g2m.genes = cc.genes$g2m.genes,
+      s.genes = cc.genes$s.genes,set.ident = TRUE)
+VlnPlot(pbmc.cellcycle, c("nGene", "S.Score", "G2M.Score"), nCol = 3)
+
+cc.genes <- c(cc.genes$g2m.genes,cc.genes$s.genes)
+top.gene.num.list = c(10,50,100,200,500)
+top.gene.11pca.percent = matrix(rep(0,length(top.gene.num.list)*11),ncol = 11)
+for (j in 1:length(top.gene.num.list)){
+  top.gene.11pca = matrix(rep("a",top.gene.num.list[j]*11),ncol = 11)
+  for (i in 1:11){
+    top.gene.11pca[,i] = DimTopGenes(pbmc,dim.use = i,reduction.type = "pca", num.genes = top.gene.num.list[j],do.balanced = TRUE)
+  }
+  
+  for (i in 1:11){
+    top.gene.11pca.percent[j,i] = length(intersect(top.gene.11pca[,i],cc.genes))
+  }
+}
+colnames(top.gene.11pca.percent) = paste0("PC",as.character(1:11),sep = "")
+rownames(top.gene.11pca.percent) = paste0("top.gene",as.character(top.gene.num.list),sep = "")
+knitr::kable(top.gene.11pca.percent)
+```
+
+
+## Question 6:
+
+6. Use Seurat to run tSNE on the top 10 principle components (regardless of how many PCs are statistically significant) from Q4. Visualize the cells and their corresponding tSNE coordinates and comment on the number of cell clusters that become apparent on tSNE. On a 2D plot, does tSNE clustering differ from PCA clustering?
+
+```{r q6,eval = FALSE}
+# Find cluster: FindClusters
+# Run tSNE analysis: RunTSNE
+# Visualization: TSNEPlot
+# Visualization: PCAPlot
+```
+
+## Question 7:
+
+7. For GRADUATE students: If you run tSNE several times with different k.seed, are the number of clusters the same and are the clusters robust?
+
+```{r q7,eval = FALSE}
+# Hint: change the seed.use command in the RunTSNE function for several times
+# Compare the tSNE plots
+```
+
+## Question 8:
+
+8. For GRADUATE students: Try different resolutions in tSNE and visualize these clusters on the tSNE graph. How does changing resolution influence the number of clustering and the number of cells assigned to each cluster?
+
+```{r q8,eval = FALSE}
+# Hint: change the resolution command in the RunTSNE function for several times
+# Compare the tSNE plots
+```
+
+## Question 9:
+
+9. Use resolution = 0.6, how many cells are assigned to each group? Using Seurat to calculate differential expression between clusters, identify putative biomarkers for each cell subpopulation. Visualize the gene expression values of these potential markers on your tSNE coordinates.
+
+```{r q9,eval = FALSE}
+cell.assigment = t(as.matrix(table(pbmc@meta.data$res.0.6)))
+colnames(cell.assigment) = names(table(pbmc@meta.data$res.0.6))
+rownames(cell.assigment) = "Cell Number"
+knitr::kable(cell.assigment, align = "c")
+
+# Hint: Use FindAllMarkers function
+# Visualization: FeaturePlot
+```
+
+## Question 10:
+
+10. For GRADUATE students: Based on the expression characteristics of your cell clusters, provide putative biological annotation (e.g. MS4A1, CD79A genes are high in B-cells) for the clusters. This paper (Newman et al, Nat Methods 2015, https://www.nature.com/articles/nmeth.3337) may serve as a good resource as well as this tutorial PBMC (https://satijalab.org/seurat/pbmc3k_tutorial.html). 
+
+```{r q10,eval = FALSE}
+# Cluster genes: FindClusters
+# Reannotate the cluster ids
+# Display tSNE plot: TSNEPlot
+# See slides related to cluster biomarkers for details.
+```
+
+## Rules for submitting the homework:
+
+Please submit your solution directly on the canvas website. Please
+provide both your code in this Rmd document and an html file for your
+final write-up. Please pay attention to the clarity and cleanness of
+your homework.
+
+The teaching fellows will grade your homework and give the grades with
+feedback through canvas within one week after the due date. Some of the
+questions might not have a unique or optimal solution. TFs will grade
+those according to your creativity and effort on exploration, especially
+in the graduate-level questions.
+
+## Acknowledgement
+- Dr. X. Shirley Liu
+- Matt Ploenzke
+
+## Good Luck!
+- Office hour until 7:00 pm for Tuesday
+- Office hour until 7:30 pm for Thursday
+- Additional office hour on each Friday 11:30 am - 12:30 pm @ HSPH Building 2 Room 428
+
+
+
+
+

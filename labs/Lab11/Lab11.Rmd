@@ -1,0 +1,517 @@
+---
+title: "STAT 115 Lab 11"
+subtitle: "TCGA, Tumor Subtypes, Methylation, Survival Analysis"
+author: "Andy Shi"
+date: "April 16-18, 2019"
+output: slidy_presentation
+---
+
+```{r libraries, results = "hide", message = FALSE}
+library(FirebrowseR) # new package
+library(bladderbatch)
+library(limma)
+library(sva)
+library(dplyr)
+library(survival)
+library(glmnet)
+library(ggplot2)
+library(survminer) # new package
+```
+
+---
+
+### Overview of Homework 6
+
++ Part I: Accessing Data from TCGA
++ Part II: Tumor Subtype Analysis
+    - LIMMA to analyze differential gene expression and methylation
+    - K-Means clustering
+    - PCA for visualization
+    - Survival analysis:
+        + Kaplan-Meier curves
+        + Cox model
+        + Gene signatures
++ Part III: Mutation Analysis
+    - Mutation Counting
+    - CRAVAT: new this year (next week)
++ Part IV: CRISPR Screens
+    - How to run MAGeCK
++ Part V: Cancer immunology
+    
+---
+
+### Part I, Q1. TCGA Website
++ TCGA's website contains raw data that you can download
++ Should be fairly straightforward, involves searching on the
+  provided website.
+
+---
+
+### Part I, Q2: Installing FirebrowseR
+
++ In R, execute: `devtools::install_github("mariodeng/FirebrowseR")`
++ If devtools not installed, `install.packages("devtools")`, and then
+  try again.
+
+---
+
+### Part I, Q2. Broad Firehose
++ Contains processed data that you can download and analyze
++ Access using firebrowse
++ R API: FirebrowseR
++ Code adapted from FirebrowseR vignette:
+  [https://github.com/mariodeng/FirebrowseR](https://github.com/mariodeng/FirebrowseR)
++ Let's download all breast cancer patients' clinical data.
+
+```{r firebrowser}
+# download all available cohorts
+cohorts <- Metadata.Cohorts(format = "csv")
+# show what cohorts are available
+#cohorts
+
+# have to do this because we can only receive 150 patients at a time
+all.Received <- FALSE
+page.Counter <- 1
+page.size <- 150
+brca_pats <- list()
+while(all.Received == FALSE) {
+    brca_pats[[page.Counter]] <- Samples.Clinical(format = "csv",
+            cohort = "BRCA", page_size = page.size, page = page.Counter)
+    if(page.Counter > 1) {
+        colnames(brca_pats[[page.Counter]]) <-
+            colnames(brca_pats[[page.Counter-1]])
+    }
+
+    if(nrow(brca_pats[[page.Counter]]) < page.size) {
+        all.Received = TRUE
+    } else {
+        page.Counter = page.Counter + 1
+    }
+}
+
+brca_pats <- do.call(rbind, brca_pats)
+dim(brca_pats)
+```
+---
+
+### Part II, Q1-Q4: Tumor Subtype Analysis
+
++ Q1: Using LIMMA to find differentially expressed genes. Please review
+  previous labs.
++ Q2: Finding gene with largest variation.
++ Q3: Kmeans clustering, also covered previously. Kmeans should identify
+  two subtypes of GBM.
++ Q4: Finding differentially expressed genes between the two GBM
+  subtypes. Also using LIMMA.
+
+---
+
+### Part II, Q5: Methylation
+
++ Methylation data is expressed as a fraction $p$ between 0 and 1. 
++ We want to transform this into a number $-\infty, \infty$.
++ Use the logit transformation: $\log(p / (1 - p))$.
++ Analysis can proceed with LIMMA analogously to microarray data.
+
+```{r logit}
+p <- seq(0, 1, by = 0.01)
+y <- qlogis(p)
+plot(p, y, type = "l")
+```
+
+---
+
+### Part II, Survival Analysis Intro
+
++ Survival data is unique in that the true survival time may be
+  censored.
++ $T_i$: the time to event for the ith individual.
++ $C_i$: the corresponding censoring time.
++ We observe $Y_i = \min(T_i, C_i)$ and $\delta_i = I(T_i \leq C_i)$
+  (i.e. $\delta_i = 1$ if $T_i \leq C_i$ and $\delta_i = 0$ if $T_i >
+  C_i$).
++ We also have predictors $X_i$ for each individual.
+
+---
+
+### Part II, Q6: Kaplan-Meier Curve
+
++ A way to estimate the *survival function* $P(T_i > t)$ from our
+  observed data, taking into account the censoring.
++ We pass in $Y_i$ and $\delta_i$ into the `Surv` function.
+
+```{r kaplan-meier}
+# using lung data from survival package
+# data wrangling to make this easier
+lung2 <- lung
+# 1 = died, 0 = still alive at last observation
+lung2$death <- lung$status - 1
+lung2$sex <- lung2$sex - 1
+
+km_fit <- survfit(Surv(time, death) ~ sex, data = lung2)
+ggsurvplot(km_fit, pval = TRUE, pval.method = TRUE) +
+    ggtitle("Survival for Tumor Subtypes")
+```
+
+---
+
+### Part II, Q6: Logrank test
+
++ The log-rank test compares the survival curves across the observed
+  time frame. Significant p-value means the two curves are different.
+
+```{r logrank-test}
+survdiff(Surv(time, death) ~ sex, data = lung2)
+```
+
+
+---
+
+### Part II, Q7: Cox Regression
+
++ The hazard function $\lambda(t)$ is defined as
+  $\lambda(t) = \lim_{\delta \to 0} \frac{1}{\delta} P(t \leq T < t +
+  \delta | T \geq t)$.
++ Interpretation: instantaneous rate at time $t$, given that the event
+  has not occurred prior to time $t$.
++ Cox proportional hazards model: $\lambda(t_i) = \lambda_0(t_i) \exp(
+  X_1 \beta_1 + \cdots + X_p \beta_p)$.
++ We are only interested in the $\beta$'s
++ We can perform estimation and inference without specifying
+  $\lambda_0(t_i)$. $\lambda_0(t_i)$ is the hazard when all $X_i = 0$,
+  and is called the baseline hazard.
++ The likelihood ratio/score/wald test output shows the predictive power
+  of the model, compared to a model without any covariates.
++ Significant p-value indicates model is performing better than model
+  without any covariates.
+
+
+---
+
+### Part II, Q7: Cox Regression Code
+
+```{r cox}
+cox_mod1 <- coxph(Surv(time, death) ~ sex, data = lung2)
+summary(cox_mod1)
+
+cox_mod2 <- coxph(Surv(time, death) ~ sex + age + ph.ecog, data = lung2)
+summary(cox_mod2)
+```
+
++ Interpretation: hazard for females is $\lambda_0(t)$, hazard for males
+is $\lambda_0(t) e^{\beta}$. $e^{\beta}$ is called the \emph{hazard
+ratio}.
+
+---
+
+### Part II, Q7: LASSO for Cox Regression
+
++ We can also apply LASSO to the Cox proportional hazards model when we
+  have too many predictors and/or we want to do model selection.
++ Code is very similar to previous code for glmnet: plug in a **matrix**
+  of predictors and a **vector** of responses. Note the `family = "cox"`
+  argument.
++ Because we have more differential genes than samples in the HW, we
+  will need to use LASSO to select the relevant genes before fitting the
+  Cox model.
+
+```{r cox-lasso}
+lung_nona <- na.omit(lung2)
+x <- as.matrix(lung_nona[,4:10])
+survobj <- Surv(lung_nona$time, lung_nona$death)
+cvfit <- cv.glmnet(x, survobj, family = "cox")
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+```
+
+---
+
+### Part II, Q8: Data Wrangling
+
++ In your HW, you will have to merge data from two different datasets.
++ Practice: merge the survival information in `lung_surv` with the
+  predictors in `lung_predictors`. Use the rownames (`id_##`) to
+  distinguish between different subjects.
+
+```{r wrangling}
+set.seed(0)
+rownames(lung2) <- paste0("id_", 1:nrow(lung2))
+lung_surv <- lung2[, c("time", "death")]
+lung_predictors <- select(lung2, -time, -death, -status)
+lung_predictors <- lung_predictors[order(lung_predictors$ph.ecog),]
+random_predictors <- matrix(rnorm(20 * nrow(lung2)), ncol = 20)
+colnames(random_predictors) <- paste0("predictor_", 1:20)
+lung_predictors <- cbind(lung_predictors, random_predictors)
+
+lung_predictors[1:5, 1:5]
+lung_surv[1:5,]
+
+# merge the predictors with the survival information so you can
+# run a Cox regression using the predictors sex + ph.ecog
+lung3 <- merge(lung_surv, lung_predictors, by = "row.names")
+lung3[1:5, 1:5]
+cox_mod3 <- coxph(Surv(time, death) ~ sex + ph.ecog, data = lung3)
+summary(cox_mod3)
+```
+
+---
+
+
+### Part II, Q8: Randomly selecting predictors
+
++ In Q8, you will have to randomly sample predictors and see if the
+  resultant model performs better than a model based on top
+  differentially expressed genes.
++ How to compare models?
+    - Naively: just look at (an analog of) mean squared error, or lok at
+      p-value of likelihood ratio/score/wald test.
+    - Not good because as we add more predictors, we will artificially
+      decrease the mean squared error.
+    - One alternative is the AIC
++ AIC: For a model with $k$ parameters, the AIC is $2k - 2 \log(L)$.
+    - $\log(L)$ is the log-likelihood.
+    - Smaller is better
+    - Penalizes models that have too many useless predictors.
++ Above, we just merged a bunch of random predictors with the original
+lung cancer data. Run 100 simulations to see if randomly selecting 3
+predictors does better than `cox_mod2`.
+
+
+```{r choose-pred}
+set.seed(20180410)
+aics <- rep(NA, 100)
+for (i in 1:100) {
+    # sample which predictors you want to use
+    pred_index <- sample(1:ncol(lung_predictors), 3, replace = FALSE)
+    # subset the predictors
+    predictors_touse <- lung_predictors[, pred_index]
+    # merge predictors with survival information
+    data_touse <- merge(lung2[, c("time", "death")], predictors_touse,
+                        by = "row.names")
+    data_touse$Row.names <- NULL
+    # fit the model
+    mod <- coxph(Surv(time, death) ~ ., data = data_touse)
+    # extract the AIC
+    aics[i] <- AIC(mod)
+}
+
+# visualize
+hist(aics)
+abline(v = AIC(cox_mod1), lwd = 2, col = "red")
+mean(aics < AIC(cox_mod1))
+```
+
+---
+
+
+## Part III, Q1: Counting mutations
+
++ Count up how many mutations are present in all the patients, and group
+  by subtype.
++ What counts as a mutation? Count mutations with the exact same amino
+  acid change as the same.
++ The amino acid change is given in the `Protein_Change` column.
+
+---
+
+
+### Part III, Q1: How to Count
+
++ Will need to tell Python about which samples belong to which subtype.
++ Can hardcode it or write a csv file from R and read that in with Python.
++ Tip: check out the `Counter` class from the `collections` module in
+Python.
+
+```
+# Tally occurrences of words in a list
+cnt = Counter()
+for word in ['red', 'blue', 'red', 'green', 'blue', 'blue']:
+    cnt[word] += 1
+cnt
+## Counter({'blue': 3, 'red': 2, 'green': 1})
+```
+
++ You can do math things like add up two `Counter` objects.
++ Check out the documentation here: [https://docs.python.org/2/library/collections.html](https://docs.python.org/2/library/collections.html)
+
+---
+
+### Part III, Q3-Q5, in case you want to get started
+
++ Will be covered next lab.
++ Do not need to use maf2vcf function. The maf2vcf function is pretty
+  annoying to install.
++ You don't need to use VCF as input (although this is what you would
+  used in an actual sequencing study). The simple input format is like:
+  "TR1 chr22 30025797 + A T sample_1"
++ Columns are UID, chromosome, position (1-based), strand, reference
+  base(s), alternate base(s), and (optional) sample ID, separated by a
+  space or tab. UID should not contain commas. For indels, use the
+  following format with "-" means no base. 
++ This simple input format could probably be prepared through a shell
+  one-liner on the MAF file. Concatenating the simple input format for
+  each maf should then be a relatively straightforward use of the "cat"
+  command in linux.
+
+---
+
+
+### Part III, Q6-Q9
+
++ Involves using web tools.
++ Show screenshots of your results and describe how you used the tool
+  (e.g. inputs that you specified).
++ See lecture slides for how to interpret results (e.g. which gene is a
+  driver gene, loss of function or gain of function).
+
+---
+
+### Part VI: Analyzing CRISPR Screen Data with MAGeCK
+
+**Installation on local computer**:
+
+1. Download the source code from SourceForge.
+2. Uncompress the source code, e.g. `tar -zxvf mageck-0.5.7.tar.gz`
+3. `cd` into the folder where the source code is.
+4. Run the installation: `python setup.py install`
+
+**Installation on Odyssey**:
+
+1. Copy the folder `/n/stat115/HW6_2019/mageck-0.5.8` to your home
+   directory: `cp -r /n/stat115/HW6_2019/mageck-0.5.8 ~`
+2. `cd ~/mageck-0.5.8`
+3. `module load Anaconda/5.0.1-fasrc01`
+4. `python setup.py install --user`
+5. Test that the command works with `mageck --help`
+
+Might get `command not found`. Try running `nano ~/.bash_profile` to
+edit the file `~/.bash_profile` and add the following 2 lines:
+
+```
+PATH=$PATH:$HOME/.local/bin:$HOME/bin
+export PATH
+```
+
+Save and quit, and then run `source ~/.bash_profile`
+
+---
+
+### How to Run
+
++ First, have to convert the fastq files into counts for each gene.
+
+```
+mageck count -l library.csv -n OUT --sample-label Day0,Day23 \
+--fastq Day0_Rep1.fastq.gz,Day0_Rep2.fastq.gz Day23_Rep1.fastq.gz,Day23_Rep2.fastq.gz
+```
+
++ Then, test if the counts are significant or not.
+
+```
+mageck test -k OUT.count.txt -t Day23 -c Day0 -n OUT
+```
+
+---
+
+### Part IV, Q1: Running on Odyssey
+
++ Sample slurm script
+
+```
+#!/bin/bash
+#SBATCH -n 1 # Number of cores
+#SBATCH -N 1 # Ensure that all cores are on one machine
+#SBATCH -t 0-06:00 # Runtime in D-HH:MM
+#SBATCH -p serial_requeue # Partition to submit to
+#SBATCH --mem=1000 # Memory pool for all cores (see also --mem-per-cpu)
+#SBATCH -o mageck.out # File to which STDOUT will be written
+#SBATCH -e mageck.err # File to which STDERR will be written
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user="YOUR_EMAIL@harvard.edu"
+
+module load Anaconda/5.0.1-fasrc01
+
+# your code here
+
+```
+
+---
+
+
+### Part IV, Q1: Basic QC for Read Mapping
+
+Look at the `countsummary.txt` file generated after `mageck count`. Look
+at documentation here for guide to QC metrics:
+[https://sourceforge.net/p/mageck/wiki/output/](https://sourceforge.net/p/mageck/wiki/output/)
+
+- Percentage of reads mapped to be above 0.6.
+- Zero counts less than 0.1.
+- Gini index less than 0.1.
+- Can check out the MAGeCKFlute package on Bioconductor for plots.
+- https://bioconductor.org/packages/release/bioc/html/MAGeCKFlute.html
+
+---
+
+
+### Part IV, Q1: Basic QC for Ribosomal Genes
+
+If you knock out ribosomal genes, the cell should definitely die. Guide
+RNAs for ribosomal genes are often put as a negative control. Check the
+`genesummary.txt` for ribosomal genes.
+
+- This file contains the genes ranked by how negatively selected
+  they are (most to least).
+- Ribosomal genes start with "RP", so you can get all the rows that
+  have ribosomal genes using `grepl("^RP", genesummary$id)` on the
+  `id` column of the `genesummary.txt` file.
+- Another check: look at the results from DAVID. Do you see functional
+annotation clusters for ribosomal activity, e.g. protein synthesis?
+
+---
+
+
+### Part IV, Q1: Basic QC for Replicate Consistency
+
+- Count each replicate separately.
+- The resultant `count.txt` file will contain one column for each of
+  the 4 samples.
+- Plot the counts for Rep1 against Rep2 and look at the correlation.
+- It should be fairly high.
+- Code to count separately:
+
+```
+mageck count -l library.csv -n OUT_SEPARATE --sample-label Day0_Rep1,Day0_Rep2,Day23_Rep1,Day23_Rep2 \
+--fastq Day0_Rep1.fastq.gz Day0_Rep2.fastq.gz Day23_Rep1.fastq.gz Day23_Rep2.fastq.gz
+```
+
+---
+
+
+### Part IV, Q2: Which genes are positively or negatively selected?
+
++ Take a look at the `gene_summary.txt` file.
++ Can filter by positive selection FDR adjusted pvalue and negatively
+  selection FDR adjusted pvalue.
++ See MAGeCKFlute vignette for plots and pathway analysis:
++ https://bioconductor.org/packages/release/bioc/vignettes/MAGeCKFlute/inst/doc/MAGeCKFlute.html 
+
+---
+
+
+### Part IV, Q3-Q4
+
++ Q3: Using an online tool.
++ Q4: Remove genes that are in the `PanEssential.txt` file.
+    - Pseudocode: `neg_genes[!(neg_genes %in% essential_genes)]`
++ Sort by p-value.
+    - `neg_genes_df[order(neg_genes_df$pvalue),]`
++ Take the top 10 and paste it in the OASIS genomics website.
+    - Make sure you select `GBM` for the disease.
+
+---
+
+
+### Part V
+
++ Mostly using websites.
++ Again, explain your steps and show screenshots.

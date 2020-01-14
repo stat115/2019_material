@@ -1,0 +1,459 @@
+---
+title: "Stat 115 Lab 3"
+subtitle: "Batch Effect, Clustering, PCA, Odyssey"
+author: "Andy Shi"
+date: "February 12-14, 2018"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Announcements
+
+- HW2 out, due 2/24 at 11:59pm.
+- Please fill out the survey for HW1 on Canvas, under quizzes.
+
+## Outline
+
+- LIMMA with contrasts.
+- Batch effect:
+    - Can detect batch effect with clustering.
+    - Correct with ComBat.
+- PCA.
+- Kmeans.
+- Odyssey:
+    - Logging in, moving around.
+    - Managing files.
+    - Basic bash commands.
+    - Slurm scripts.
+    - BWA.
+    - STAR.
+- Next week: KNN, SVM, Cross-validation, DAVID, GSEA. 
+
+## Install and Load Packages
+
+```{r bioc, eval = FALSE}
+# install packages from bioconductor
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("bladderbatch", version = "3.8")
+BiocManager::install("leukemiasEset", version = "3.8")
+```
+
+```{r libraries, warning = FALSE, message = FALSE}
+library(sva)
+library(limma)
+library(bladderbatch)
+library(leukemiasEset)
+library(dplyr)
+library(biobroom)
+library(ggplot2)
+```
+
+## LIMMA with Contrasts
+
+- Several different groups to compare, but want to pool data to
+estimate variances.
+- Will want to consider this for the Taylor data in Part II.
+- For Part I, can either analyze the two cell lines separately or
+also use a contrast.
+
+## Load Example Data
+
+- Leukemia data: 5 different types, plus no leukemia (NoL)
+- Consider ALL, AML, and NoL.
+- Don't worry too much about the code for subsetting the data: won't
+need this for the homework.
+- Leukemia type stored in `LeukemiaType`.
+- Expression data stored as a matrix in `leukemia_expr`.
+- Assume that we already performed RMA to normalize the data.
+- Inspiration: [https://kasperdanielhansen.github.io/genbioconductor/html/limma.html](https://kasperdanielhansen.github.io/genbioconductor/html/limma.html)
+
+```{r load-leukemia}
+data(leukemiasEset)
+table(leukemiasEset$LeukemiaType)
+
+# subset to ALL, AML, and NoL
+ind <- leukemiasEset$LeukemiaType %in% c("ALL", "AML", "NoL")
+ourData <- leukemiasEset[, leukemiasEset$LeukemiaType %in% c("ALL", "AML", "NoL")]
+LeukemiaType <- factor(ourData$LeukemiaType)
+leukemia_expr <- exprs(ourData)
+```
+
+## Limma Design Matrix
+
+- Design Matrix has 3 columns: ALL, AML, and NoL.
+- `makeContrasts` function tells limma what comparisons we want to make.
+
+```{r limma-design}
+design <- model.matrix(~0 + LeukemiaType)
+head(design, 5)
+colnames(design) <- c("ALL", "AML", "NoL") # rename columns
+head(design, 5)
+contrasts.mat <- makeContrasts(ALLvsNoL = ALL - NoL,
+                               AMLvsNoL = AML - NoL,
+                               ALLvsAML = ALL - AML,
+                               levels = design)
+```
+
+## Limma Fitting
+
+- Basically like before, except we add the `contrast.fit`.
+- To calculate FDR, first group by the comparison (`term` column).
+- Can then filter by term, fdr, log2-fold change (estimate)
+
+```{r limma-fit}
+limma_fit <- lmFit(leukemia_expr, design) %>%
+    contrasts.fit(contrasts.mat) %>%
+    eBayes() %>%
+    tidy()
+limma_fit
+limma_fit <- limma_fit %>% group_by(term) %>%
+    mutate(fdr = p.adjust(p.value, method = "fdr")) %>%
+    ungroup()
+limma_fit %>% filter(term == "ALLvsNoL") %>% arrange(p.value)
+```
+
+## KMeans
+
+- An unsupervised method to cluster the data (no labels/outcomes
+provided).
+- Requires that you specify the number of clusters in advance.
+- We can use either all the genes, or only the differentally expressed
+genes.
+- We can subset the `leukemia_expr` matrix using the row names.
+
+```{r de-genes}
+genelist <- limma_fit %>%
+    filter(fdr <= 0.05, abs(estimate) >= log2(1.5)) %>%
+    distinct(gene)
+leukemia_subset <- leukemia_expr[genelist$gene, ]
+```
+
+## KMeans: Running
+
+- KMeans algorithm is random and does not always find the global optimum.
+    - Can try random restarts (`nstarts` option) to get a better
+    solution.
+- Can visualize results in a table.
+- Remember the cluster labels (1, 2, 3) are arbitrary and can change
+from run to run.
+
+```{r kmeans}
+leukemia_km1 <- kmeans(t(leukemia_subset), centers = 3, nstart = 10)
+data.frame(type = ourData$LeukemiaType,
+           cluster = leukemia_km1$cluster) %>%
+    table()
+
+leukemia_km2 <- kmeans(t(leukemia_expr), centers = 3, nstart = 10)
+data.frame(type = ourData$LeukemiaType,
+           cluster = leukemia_km2$cluster) %>%
+    table()
+```
+
+## Break
+
+## Batch Effect
+
+- Why is batch effect a problem?
+- Example data: Gene expression data from investigation into bladder
+cancer.
+- Outcome: finding differentially expressed genes that are
+associated with cancer status (0/1 in the variable `hasCancer`).
+- Already normalized with RMA.
+- `pheno`: Dataset that contains phenotypes.
+- `edata`: Expression matrix.
+
+```{r loaddata}
+data(bladderdata)
+pheno <- pData(bladderEset)
+pheno <- pheno %>%
+    mutate(hasCancer = as.numeric(cancer == "Cancer"))
+head(pheno)
+edata <- exprs(bladderEset)
+```
+
+## Hierarchical Clustering
+
+- A way to visualize batch effect.
+- Can be used to cluster many types of data.
+- Don't need to pre-specify the number of clusters.
+- Use the `hclust` command.
+- Can plot the clustering result with `plot`.
+- Clustering requires distances between each of the samples.
+- Can have different types of linkages: if we know the distance
+between samples, how to calculate the distance between two clusters?
+    - Recall, at each step we join the two closest clusters.
+
+![](clustering-linkages.png){ width=100% }
+
+Source: CS 181 course notes by Ryan Adams.
+
+## Clustering Code
+
+- Question: Why do I need `t` in the code below?
+- Linkage specified using the `method` argument.
+
+```{r clustering}
+clustering <- edata %>% t() %>% dist() %>%
+    hclust(method = "complete")
+plot(clustering, labels = pheno$batch)
+plot(clustering, labels = pheno$cancer)
+```
+
+
+## ComBat
+
+- Perform batch effect adjustment
+- Need to specify model matrix: same matrix you use for LIMMA
+- Tells ComBat to remove the batch effect but not to remove the
+association due to whatever model you are going to run.
+- In this example, we model gene expression as a function of whether
+or not the sample is cancerous (`hasCancer` variable)
+
+```{r combat}
+model <- model.matrix(~pheno$hasCancer)
+combat_edata <- ComBat(dat = edata, batch = pheno$batch, mod = model)
+```
+
+## Check Clustering Again
+
+- Can you perform clustering to check whether ComBat removed the batch
+effect?
+
+```{r combat-clusters}
+clustering_combat <- combat_edata %>% t() %>% dist() %>% 
+    hclust(method = "complete")
+plot(clustering_combat, labels = pheno$cancer)
+plot(clustering_combat, labels = pheno$batch)
+```
+
+## Break
+
+
+## PCA
+
+- Finds the best linear combinations of the variables.
+- "Best" means optimally describing the variance.
+- Can produce lower-dimensional summaries of the data.
+    - Take 100 numbers per sample and summarize them with 2 numbers
+    per sample.
+- Useful for visualization, among other things.
+
+![Source:
+https://en.wikipedia.org/wiki/File:GaussianScatterPCA.svg](GaussianScatterPCA.svg.png)
+
+## PCA
+
+- Main function: `prcomp`.
+- Want to center and scale your data. For example, if you were
+doing PCA for car data, two variables could be number of cylinders
+and weight of the car.
+- Cars might have 4-8 cylinders, but weight could be measured in
+kilograms or grams.
+- Don't want weight to have higher influence just because of how it's
+measured.
+
+## PCA Code
+
+```{r pca}
+pca_result <- edata %>% t() %>% prcomp(center = TRUE, scale. = TRUE)
+edata_pc_df <- as.data.frame(pca_result$x)
+edata_pc_df <- edata_pc_df %>%
+    mutate(batch = as.factor(pheno$batch),
+           hasCancer = as.factor(pheno$hasCancer))
+edata_pc_df[1:5, 1:5]
+
+ggplot(edata_pc_df, aes(x = PC1, y = PC2, color = batch)) +
+    geom_point()
+ggplot(edata_pc_df, aes(x = PC1, y = PC2, color = hasCancer)) +
+    geom_point()
+```
+
+## R Aside: Lists
+
+- `pca_result` is a list. It holds a mix of data types.
+- Can access an individual list element with `$`, e.g. `pca_result$x`.
+- A lot of R functions use lists to return multiple things.
+- Look at `prcomp` documentation (`?prcomp`) under Value to see the
+meaning of each of the things in the list.
+
+## PCA Variance Explained
+
+- Linear algebra result: $\text{trace}(\Sigma) = \sum_i \lambda_i$
+- $\text{trace}(\Sigma)$ can be thought of as total variance.
+- Variance of $PC_i$ is $\lambda_i$
+- So variance explained by PCs 1 to j is $\frac{\sum_{i = 1}^j \lambda_i}{\sum_{i = 1}^K \lambda_i}$
+- Denominator is sum of all eigenvalues
+
+## PCA Variance Explained Code
+
+- Eigenvalues are the square of `sdev`.
+- Can use `which` and `min` to find how many PCs you need to explain
+x% of the variance.
+
+```{r pca-var-explained}
+eigenvals <- (pca_result$sdev)^2
+n_eigenvals <- length(eigenvals)
+var_explained <- cumsum(eigenvals) / sum(eigenvals)
+data.frame(index = 1:n_eigenvals,
+           var_explained = var_explained) %>%
+    ggplot(aes(x = index, y = var_explained)) + geom_line() +
+    xlab("Eigenvalue Index") + ylab("Cum. variance explained") +
+    ggtitle("PCA Variance Explained")
+
+which(var_explained > 0.8)
+min(which(var_explained > 0.8))
+```
+
+## PCA After ComBat: Does it change?
+
+- Exercise.
+
+```{r pca-combat}
+# your turn
+# run PCA on the data from ComBat, draw a plot of the result
+```
+
+## Break
+
+## BWA
+
+- Uses Burrows-Wheeler transform.
+- Requires an index to be made before aligning.
+- 3 different versions:
+    + BWA-backtrack (`aln/samse/sampe`)
+    + BWA-SW (`bwasw`)
+    + BWA-MEM (`mem`)
+- Different recommendations depending on data:
+    + BWA-backtrack: Illumina reads up to 100bp
+    + BWA-SW / BWA-MEM: longer sequeces from 70bp to 1Mbp
+    + BWA-MEM latest version, recommended since generally faster and
+    more accurate
+    + BWA-MEM better than BWA-backtrack for 70-100bp Illumina reads
+- We have short reads, so for the HW, we recommend `bwa aln`.
+- How to run (basic):
+    - Replace `ref.fasta` and `read1.fastq` with the path on Odyssey.
+
+```{r engine = "bash", eval = FALSE}
+# align each end separately
+bwa aln ref.fasta read1.fastq > read1.sai
+bwa aln ref.fasta read2.fastq > read2.sai
+# stick everything in a SAM file
+bwa sampe ref.fasta read1.sai read2.sai read1.fastq read2.fastq > aln-pe.sam
+# count number of aligned reads, etc.
+samtools flagstat aln-pe.sam
+```
+
+## STAR
+
+- [Star: ultrafast universal RNA-seq aligner](https://academic.oup.com/bioinformatics/article/29/1/15/272537)
+    - Suffix array (SA) approach to leverage speed of binary searching.
+    - Requires an index (the SA) to be created prior to aligning.
+- Splice-aware aligner.
+- Replace STARIndex with path of STARIndex.
+- Replace read1.fastq and read2.fastq with path to the reads.
+- Replace `output` with something more meaningful.
+
+```{r, engine = "bash", eval = FALSE}
+STAR --genomeDir STARIndex \
+--readFilesIn read1.fastq read2.fastq \
+--runThreadN 1 --outFileNamePrefix output 
+```
+
+## Odyssey
+
+- What is Odyssey? Lots of computers stringed together
+- Advantage: More storage, can run many things in parallel (e.g. use
+10 computers to process 10 samples at a time)
+- Disadvantage: a lot of overhead to get things to work (have to make
+sure your stuff doesn't interfere with other people's stuff)
+- Can't just run stuff through the terminal on Odyssey.
+- Have to submit job using srun or sbatch (preferred)
+- My tip: start off by requesting very few resources and doing a test
+run on a small file.
+- **START EARLY**. You might have to wait a long time for your jobs
+to run.
+- Odyssey might also be slow if everyone in the class tries at
+the last minute.
+
+## Odyssey Logistics
+
+- Login using ssh (Mac/Linux) or PuTTY (Windows)
+- Need both your password and 6-digit code, either on your phone or
+as a Java applet on your computer (I recommend going with phone).
+- Transfer files using Filezilla or WinSCP.
+- Details: [https://www.rc.fas.harvard.edu/resources/odyssey-quickstart-guide/](https://www.rc.fas.harvard.edu/resources/odyssey-quickstart-guide/)
+
+## Basic Bash Commands
+
+- `pwd`: Print Working Directory. Where am I?
+- `cd folder`: Change directories.
+- `cd`: Shortcut to go back to home directory.
+- `..`: Shortcut for going up a directory.
+    - `cd ..`
+    - `cd ../../`
+    - `cd ../folder`
+- `~`: shortcut for home directory. Can use it like so: `cd ~/stat115-hw2`.
+- `mkdir folder`: Make a directory called `folder`.
+- `less file`: View a file. Press `q` to quit.
+- `man cmd`: Get help on `cmd`. Press `q` to quit.
+- Videos about command line: [https://www.youtube.com/watch?v=U3iNcBtycaQ](https://www.youtube.com/watch?v=U3iNcBtycaQ)
+
+
+## Odyssey Commands
+
+- `sbatch submissionScript.sh`: Submit a job.
+- `sacct` or `squeue`: See how my submissions are doing.
+- `scancel`: Cancel a job.
+- Can check job status online, too: [https://portal.rc.fas.harvard.edu/login/?next=/jobs/](https://portal.rc.fas.harvard.edu/login/?next=/jobs/)
+
+## Example Submission Script
+
+- Save this to a file in your home directory (e.g. `submit.sh`).
+    + Good idea to make a `stat115-hw2` folder
+- Submit by running `sbatch submit.sh`.
+- Can edit on your own computer using a a plain text editor (e.g.
+Sublime or TextEdit)
+- Transfer the file using Filezilla/WinSCP.
+
+```{r engine = "bash", eval = FALSE}
+#!/bin/bash
+#SBATCH -n 1 # Number of cores requested
+#SBATCH -N 1 # Ensure that all cores are on one machine
+#SBATCH -t 15 # Runtime in minutes
+#SBATCH -p serial_requeue # Partition to submit to
+#SBATCH --mem=1G # Memory in GB (see also --mem-per-cpu)
+#SBATCH -o output_%j.out # Standard out goes to this file
+#SBATCH -e error_%j.err # Standard err goes to this file
+
+# LOAD_MODULES
+module load ...
+
+# YOUR_COMMANDS_HERE
+bwa aln ...
+```
+
+## Submission Script Recommended Parameters
+
+- Runtime: 30 min for BWA, 20 min for STAR
+- Memory: 5G for BWA, 32G for STAR
+- Change the name of the `.out` and `.err` files to something more
+meaningful.
+- Stick with `serial_requeue`. You'll have to wait less.
+- Need to load modules for the tools we want to use.
+- Modules for BWA:
+``` 
+module load bwa/0.7.15-fasrc02
+module load samtools/1.5-fasrc02
+```
+- Modules for STAR:
+```
+module load STAR/2.6.0c-fasrc01
+```
+- Module search: [https://portal.rc.fas.harvard.edu/apps/modules](https://portal.rc.fas.harvard.edu/apps/modules)
+
+
+## Odyssey Demo

@@ -1,0 +1,311 @@
+---
+title: "Stat 115 Lab 4"
+subtitle: "KNN, SVM, CV, DAVID, GSEA"
+author: "Andy Shi"
+date: "February 19-21, 2019"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center")
+```
+
+## Outline
+
+- K Nearest Neighbors (KNN)
+- Support Vector Machines (SVMs)
+- Cross-validation
+- DAVID
+- GSEA
+
+## Install and Load Packages
+
+```{r install, eval = FALSE}
+install.packages("class")
+install.packages("e1071")
+install.packages("caret")
+install.packages("msigdbr")
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("fgsea", version = "3.8")
+```
+
+```{r libraries, warning = FALSE, message = FALSE}
+library(ggplot2)
+library(class)
+library(e1071)
+library(caret)
+library(leukemiasEset)
+library(bladderbatch)
+library(sva)
+library(dplyr)
+library(limma)
+library(biobroom)
+library(msigdbr)
+library(fgsea)
+library(hgu133plus2.db)
+```
+
+## KNN and SVM Introduction
+
+- They are both classifiers.
+- Predict outcomes $y$ from covariates $X$.
+- Different from clustering: in clustering, only have covariates $X$,
+no labels $y$.
+- Data: we have $X$ and $y$ for some training data, and we want to
+predict $y$ from $X$ for test data.
+
+
+## K Nearest Neighbors (KNN)
+
+- Get the $K$ closest neighbors for each member of the test set by
+comparing $X$ for training data to $X$ for test data.
+- Based on a vote using these neighbors, assign $y$ to test set.
+    - E.g. all the neighbors for one member of test set are normal, so
+    classify that member of the test set as normal.
+
+![KNN Example (from Wikipedia)](https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/KnnClassification.svg/850px-KnnClassification.svg.png)
+
+## Preparing the Data
+
+- Won't need to do this for your HW.
+- Only including ALL, AML, and NoL.
+- Generating a training set and test set.
+
+```{r leukemia-prep}
+data(leukemiasEset)
+table(leukemiasEset$LeukemiaType)
+
+# subset to ALL, AML, and NoL
+ind <- leukemiasEset$LeukemiaType %in% c("ALL", "AML", "NoL")
+ourData <- leukemiasEset[, leukemiasEset$LeukemiaType %in% c("ALL", "AML", "NoL")]
+LeukemiaType <- factor(ourData$LeukemiaType)
+leukemia_expr <- exprs(ourData)
+
+# split data into train and test
+set.seed(1234)
+train_ind <- sample(1:ncol(leukemia_expr), size = 20, replace = FALSE)
+expr_train <- leukemia_expr[, train_ind]
+expr_test <- leukemia_expr[, -train_ind]
+type_train <- LeukemiaType[train_ind]
+type_test <- LeukemiaType[-train_ind]
+```
+
+## Running KNN
+
+- `knn(train, test, train_cl, k)`.
+- Make sure train and test data frames have 1 sample per row.
+- Visualize result with confusion matrix function (from caret package).
+
+```{r knn}
+type_knn <- knn(t(expr_train), t(expr_test), type_train, k = 3)
+confusionMatrix(type_knn, type_test)$table
+```
+
+## SVM Overview
+
+- Goal: draw a line or hyperplane called a decision boundary separating
+the classes such that the *margin* (min distance to the hyperplane) is
+maximized.
+- SVM can use different kernels to draw different decision boundaries.
+    - Transform the data, and then draw a linear boundary in the
+    transformed space.
+- `kernel = "linear"` means SVM draws a linear decision boundary.
+
+
+![](https://upload.wikimedia.org/wikipedia/commons/1/1b/Kernel_Machine.png)
+
+## SVM Example
+
+- Can run SVM on bladder batch data to predict cancer status.
+- 3 outcomes: Biopsy, Cancer, Normal
+- First fit SVM on training data.
+- Then get predictions for testing data.
+
+
+```{r svm-example}
+# process the data with ComBat
+data(bladderdata)
+pheno <- pData(bladderEset)
+pheno <- pheno %>%
+    mutate(hasCancer = as.numeric(cancer == "Cancer"))
+edata <- exprs(bladderEset)
+model <- model.matrix(~pheno$hasCancer)
+combat_edata <- ComBat(dat = edata, batch = pheno$batch, mod = model)
+
+# split data into training and test data
+set.seed(0)
+test_ind <- sample(1:ncol(combat_edata), 10, replace = FALSE)
+expr_train <- combat_edata[, -test_ind]
+cancer_train <- as.factor(pheno$cancer[-test_ind])
+expr_test <- combat_edata[, test_ind]
+cancer_test <- as.factor(pheno$cancer[test_ind])
+
+# fit SVM on training data
+svm_result <- svm(t(expr_train), cancer_train, kernel = "linear")
+confusionMatrix(svm_result$fitted, cancer_train)$table
+
+# get prediction for test data
+preds <- predict(svm_result, t(expr_test))
+confusionMatrix(preds, cancer_test)$table
+```
+
+## Cross-validation
+
+- SVMs have a `cost` parameter: controls the penalty for
+misclassification
+- How to set? Need to use cross-validation.
+- Cross-validation: split up the data. Train on one portion, get an
+estimate of the error on the other.
+- Prevents overfitting
+
+![Source:
+https://en.wikipedia.org/wiki/Cross-validation_(statistics)](K-fold_cross_validation.jpg)
+
+## SVM: Toy example
+
+```{r simdata, echo = FALSE}
+# Simulate points in an annulus using rejection sampling. Won't actually
+# get n points per try. r1 and r2 are the inner and outer radii,
+# respectively.
+sim_annulus <- function(n, r1, r2) {
+    # don't worry about this code! Not needed for Stat115.
+    stopifnot(r1 < r2)
+    pts <- matrix(runif(2 * n, -1, 1), nrow = n, ncol = 2)
+    radii <- sqrt((pts[, 1])^2 + (pts[, 2])^2)
+    good_inds <- (radii >= r1) & (radii <= r2)
+    good_pts <- pts[good_inds,]
+    colnames(good_pts) = c("x", "y")
+    return(good_pts)
+}
+
+# generate the data
+set.seed(0) # set seed for reproducibility
+circ1 <- sim_annulus(2500, 0.3, 0.5)
+circ2 <- sim_annulus(1000, 0.8, 1)
+circ_dat <- rbind(circ1, circ2)
+type <- as.factor(c(rep("Type 1", nrow(circ1)),
+                    rep("Type 2", nrow(circ2))))
+circ_df <- as.data.frame(circ_dat)
+circ_df$type <- type
+head(circ_dat)
+head(type)
+
+ggplot(circ_df, aes(x = x, y = y, color = type)) + geom_point()
+```
+
+## SVM: Using Linear kernel
+
+- Using the `tune` function to perform cross validation.
+- Can plot the decision boundary for this simpler case:
+
+```{r svm-linear}
+set.seed(0)
+shuffle_inds <- sample(1:nrow(circ_df), replace = FALSE)
+svm_tune <- tune(svm, circ_dat[shuffle_inds, ], type[shuffle_inds],
+                 kernel = "linear",
+                 ranges = list(cost = c(0.01, 0.1, 1, 10)),
+                 tunecontrol = tune.control(cross = 3))
+plot(svm_tune)
+svm_tune
+
+# Technical note: svm can use a formula or matrices. We use formula
+# here in order to make the plot.
+svm_circ <- svm(type ~ x + y, data = circ_df, kernel = "linear",
+                cost = 1)
+confusionMatrix(svm_circ$fitted, circ_df$type)$table
+plot(svm_circ, circ_df)
+```
+
+## SVM: Using Radial Kernel on Toy Example
+
+```{r svm-radial}
+svm_circ_radial <- svm(type ~ x + y, data = circ_df, kernel = "radial")
+confusionMatrix(svm_circ_radial$fitted, circ_df$type)$table
+plot(svm_circ_radial, circ_df)
+```
+
+## DAVID vs. GSEA
+
+- Idea: look for sets of genes (e.g. biological pathways) that are
+overrepresented in your results.
+- DAVID takes a selected list of differentially expressed genes and sees
+if there are genes in certain gene sets that are over-represented by
+counting.
+- GSEA takes all the genes and uses the test statistics (e.g. t-value).
+- Need to have a good definition for the gene set.
+- DAVID has its own gene set definitions.
+- GSEA requires you to supply your own---can choose many different ones.
+    - One good option is [MSigDB](http://software.broadinstitute.org/gsea/msigdb/index.jsp).
+    - Curated gene sets from the Broad Institute for many organisms.
+    - We will use the Hallmark gene set for humans.
+
+## DAVID
+
+- Take differentially expressed genes from limma.
+- Upload tab:
+    1. Paste list into DAVID.
+    2. Select identifier: AFFYMETRIX_3PRIME_IVT_ID
+    3. List type: check gene list.
+    4. Submit
+- Background tab: select the Affymetrix array that was used.
+    - For the bladder data and for HW, it's
+    Human Genome U133 Plus 2 Array.
+- Functional annotation clustering.
+
+```{r david}
+design <- model.matrix(~pheno$hasCancer)
+limma_fit <- lmFit(combat_edata, design) %>%
+    eBayes() %>%
+    tidy() %>%
+    mutate(fdr = p.adjust(p.value, method = "fdr")) %>%
+    arrange(p.value)
+up_genes <- limma_fit %>% filter(fdr < 0.05, estimate > log2(2))
+down_genes <- limma_fit %>% filter(fdr < 0.05, estimate < -log2(2))
+
+write.csv(up_genes, file = "david_up.csv")
+write.csv(down_genes, file = "david_down.csv")
+```
+
+## GSEA Setup
+
+- First, need to merge limma results to get gene name as symbol.
+    - Using `inner_join` as demoed in Lab 2.
+- Use ALL the genes, not just the significant ones.
+- Remove NA gene symbols and remove duplicates.
+- Select appropriate gene set.
+
+```{r gsea-prep, cache = TRUE}
+# select gene set
+m_df = msigdbr(species = "Homo sapiens", category = "H")
+m_list = m_df %>% split(x = .$gene_symbol, f = .$gs_name)
+
+Annot <- data.frame(
+    PROBEID = names(contents(hgu133plus2REFSEQ)),
+    REFSEQ = sapply(contents(hgu133plus2REFSEQ), paste, collapse=", "),
+    SYMBOL = sapply(contents(hgu133plus2SYMBOL), paste, collapse=", "),
+    DESC = sapply(contents(hgu133plus2GENENAME), paste, collapse=", "),
+    stringsAsFactors = FALSE
+)
+
+de_genes <- limma_fit %>%
+    inner_join(Annot, c("gene" = "PROBEID")) %>%
+    filter(SYMBOL != "NA") %>%
+    distinct(SYMBOL, .keep_all = TRUE)
+stats <- de_genes$statistic
+names(stats) <- de_genes$SYMBOL
+```
+
+## GSEA
+
+- Using the `fgsea` package from Bioconductor.
+- Can plot the result for a pathway using the `plotEnrichment` function.
+
+```{r gsea, cache = TRUE}
+fgsea_res <- fgsea(pathways = m_list, stats = stats, nperm = 10000)
+fgsea_res %>% filter(padj < 0.05) %>% arrange(pval) %>% head()
+```
+
+```{r gsea-plot}
+plotEnrichment(m_list[["HALLMARK_MYOGENESIS"]], stats)
+```

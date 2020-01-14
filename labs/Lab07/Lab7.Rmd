@@ -1,0 +1,405 @@
+---
+title: "Stat 115 Lab 7"
+subtitle: "ChIP-Seq Analysis"
+author: "Yushi Tang"
+date: "March 12/14, 2019"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center")
+```
+
+## Anouncements
+
+- No additional office hour for this Friday due to the Spring Recess 
+- Have a nice break
+- HW4 is due on March 31, 2019 @ 11:59 pm
+
+
+## Outline
+
+- Odyssey Fest
+    - Manipulate the available modules on the Odyssey
+    - Example & Practice
+- ChIP-Seq
+    - Concepts review
+    - Useful resources
+- MACS
+- BedTools
+- UCSC
+- Cheer for Experiences
+
+## Odyssey Fest
+
+- Manipulate the available modules on the Odyssey
+- You would need to request FAS RC friends to install unavailable modules
+- How to check whether the module we needed is available?
+- How to detect which version to use?
+- Example: check the availability of module macs2 on the Odyssey and detect the most updated version
+
+```{r odyssey1,engine='bash',eval=FALSE}
+module spider macs2
+```
+
+```{r odyssey2,engine='bash',eval=FALSE}
+module spider macs2/2.1.2_dev-fasrc01
+```
+
+```{r odyssey3,engine='bash',eval=FALSE}
+# To load the module macs2/2.1.2_dev-fasrc01, you will need to
+module load centos6/0.0.1-fasrc01
+module load macs2/2.1.2_dev-fasrc01
+```
+
+- Practice: check the availability of module bwa and samtools on the Odyssey and detect the most updated version
+
+## ChIP-Seq
+
+- Popular technology to identify binding sites of transcription factors and other DNA-binding proteins
+- Requires less starting material, lower cost, higher peak resolution than ChIP-chip
+- Reads must be mapped before technology-specific pipelines may be used
+- Use BAM to align ChIP-Seq data
+    - Check the website for data format: https://genome.ucsc.edu/FAQ/FAQformat.html#format5.1
+- How many binding protein could one identify for a ChIP-seq experiment?
+    - As much as the number of your antibodies
+
+## ChIP-Seq
+![http://slideplayer.com/slide/3385783/](./figures/ChIP-seq+overview+DNA+++bound+protein+Fragment+DNA+Immunoprecipitate.jpg)
+
+## A Previous ENCODE-DREAM Challenge
+- ENCODE-DREAM in vivo Transcription Factor Binding Site Prediction Challenge
+- A closed project but very useful resources https://www.synapse.org/#!Synapse:syn6131484/wiki/402036
+- An MIT course: ChIP-seq Analysis; DNA-protein Interactions https://ocw.mit.edu/courses/biology/7-91j-foundations-of-computational-and-systems-biology-spring-2014/video-lectures/leture-7-chip-seq-analysis-dna-protein-interactions/
+
+## ChIP-Seq Difficulties
+![http://www.strand-ngs.com/features/chip-seq](./figures/chipseq-0-peakdetection-large.png)
+
+- Tags represent only the ends of ChIP fragments, not the precise location of the DNA-binding protein
+    - Shift should be accounted for to improve peak calling
+- Exhibits regional biases 
+    - Due to sequencing and mapping biases
+    - Chromatin structure (There would be a bias if there is protein binding here)
+- How to solve this? 3D Genome and Hi-C data!
+    - Video 1: https://www.youtube.com/watch?v=FqoLm7E0mZ4
+    - Video 2: https://www.youtube.com/watch?v=6lqMdtj204s
+
+
+## MACS: Overview
+
+- Model-based analysis of ChIP-Seq (MACS) 
+- Peak calling method to identify genomic binding sites from read count data
+- [Documentation](https://github.com/taoliu/MACS)
+![https://www.ncbi.nlm.nih.gov/pubmed?cmd=search&term=18798982%5Bpmid%5D](./figures/macs.png)
+
+## MACS: Overview
+
+- Empirically models the shift size of ChIP-Seq tags
+    - Tags  shifted towards the 3' direction
+    - Tag density around a true binding site should show a bimodal enrichment pattern
+    - Initial scan for high confidence peaks and use these to estimate *d*
+    - Shift all tags by *d/2*
+    - Check the highly confident peaks with significantly high fold change
+    - Picture (b) is used for validation of picture (a)
+![Zhang, Y., Liu, T., Meyer, C. A., Eeckhoute, J., Johnson, D. S., Bernstein, B. E., ... & Liu, X. S. (2008). Model-based analysis of ChIP-Seq (MACS). Genome biology, 9(9), R137](./figures/fig1a.png)
+
+## MACS: Overview
+
+#### The peaks that you are calling is not as rich as your motif, if you only do not use local lambda and tag shifting.
+
+- Accounts for regional biases via dynamic parameter estimation
+    - Tag distribution modelled with Poisson distribution
+    - Estimate $\lambda_{BG}$ from control tags
+    - Slide width=$d$ bins across the genome to identify candidate peaks
+    - Estimate $\lambda_{1k},\lambda_{15k},\lambda_{10k}$ surrounding each candidate peak
+    - Select the maximum $\lambda$ and calculate p-value based on this parameter
+    - Why we pick the maximum lambda? To keep it as conservative as possible. Fewer peaks would be called, compared with using the threshold of $\lambda_{BG}$
+
+![Zhang, Y., Liu, T., Meyer, C. A., Eeckhoute, J., Johnson, D. S., Bernstein, B. E., ... & Liu, X. S. (2008). Model-based analysis of ChIP-Seq (MACS). Genome biology, 9(9), R137](./figures/fig1c.png)
+
+## MACS: Overview
+![Zhang, Y., Liu, T., Meyer, C. A., Eeckhoute, J., Johnson, D. S., Bernstein, B. E., ... & Liu, X. S. (2008). Model-based analysis of ChIP-Seq (MACS). Genome biology, 9(9), R137](./figures/fig1e.png)
+
+## MACS: Pipeline
+
+1. Align reads (Input Fastq output BAM)
+2. Remove duplicates (Input BAM output BED)
+3. Downsample (balance reads between treatment and control)
+4. Call peaks (Input BAM output BED)
+5. Visualize peaks (UCSC)
+6. Integrate gene expression data (BETA, next lab)
+
+## MACS: Remove Duplicates
+
+- Amplification bias introduced during PCR step
+- Duplicates removed with maximum number allowed depending on sequencing depth
+- The default is no more than one tag per position (remove all redundancies)
+
+```{r,engine='bash',eval=FALSE}
+## There are wupposed to be bash
+#-i Intput file
+#-g Genome size
+#--keep-dup Duplicates to keep 
+#-o Output file
+
+# How to load the module again?
+
+macs2 filterdup -i In.bam -g mm --keep-dup 1 -o Out.bed
+```
+
+
+## MACS: Downsample
+
+In ChIP-Seq analysis, a bias often occurs in results when the number of reads in treatment and control are different. One solution for correcting the bias is to subset the sample with the larger number of reads to the same number as the treatment, which can be achieved using macs2 randsample. The samples in this experiment might not be too bad.
+
+- Imbalance in read counts between treatment and control can bias results
+- Check which files has more reads (e.g. `wc -l file.BAM`)
+- 'wc -l file.BAM' help us to examine the number of reads
+
+```{r,engine='bash',eval=FALSE}
+#-t Intput file
+#-n Number to sample 
+#-o Output file
+
+# All these three commands could be in the same batch file and performed at the same time. 
+
+macs2 randsample -t In.bed -n 10^6 -o Out.bed
+```
+
+## MACS: Peak Calling
+
+- Finally, call peaks
+- MACS will handle estimating *d*, sliding the tags by *d/2*, and estimating *$\lambda$*
+- Two parameters for changing the fold change (-m or --fe-cutoff)
+
+```{r,engine='bash',eval=FALSE}
+#-t Treatment file
+#-c Control file 
+#-f File format 
+#-n Output prefix
+#-g Genome size
+#-m low_fold_number high_fold_number
+#--fe-cutoff low_fold_number
+
+macs2 callpeak -t Trt.bed -c Ctrl.bed -f AUTO -g hs -n Out
+```
+
+## .Bed File format
+- Browser Extensible Data
+- Provides a flexible way to define the data lines that are displayed in an annotation track
+- [Details on the file format](https://genome.ucsc.edu/FAQ/FAQformat.html#format1)
+- 3 required fields
+    - Chromosome
+    - Start
+    - End
+- Start position is zero based, and start=n1 to stop=n2 represents the interval (n1 + 1, n2)
+- 9 0ptional fields
+    – Name
+    – Feature score (e.g. p value) 
+    – Strand {+, −}
+
+## Bedtools: Overview
+- 'Collectively, the bedtools utilities are a swiss-army knife of tools for a wide-range of genomics analysis tasks. The most widely-used tools enable genome arithmetic: that is, set theory on the genome.'
+- I.e. implementations of simple operations which may be combined for complex analyses
+    -  *Are the same peaks called in two ChIP-Seq experiments?*
+- [Documentation](http://bedtools.readthedocs.io/en/latest/)
+- Commandline tool however `bedr` R package available
+- Many [installation options](http://bedtools.readthedocs.io/en/latest/content/installation.html) (homebrew, macports, etc.)
+
+## Bedtools: Functions
+- Simple example: sorting
+
+```{r,engine='bash',eval=FALSE}
+bedtools sort -i data/randomIntervals.bed > data/Sorted.bed
+```
+
+- How could we know the actual function of this command?
+
+## Bedtools: Functions
+- And many more command line examples!
+- Again, how could we know the actual function of this command?
+```{r,engine='bash',eval=FALSE}
+##### These are many useful command lines for dealing with bed files. 
+# Find closest genomic interval
+bedtools closest -a File1.bed -b File2.bed > Out.txt
+# Intersection
+bedtools intersect -a File1.bed -b File2.bed > Out.txt
+# Annotate File1.bed with coverage by File2.bed
+bedtools annotate -i File1.bed -files File2.bed > Out.txt
+# Convert File1.bam to File1.bed
+bedtools bamtobed -i File1.bam > File1.bed
+# To generate random intervals from a genome:
+bedtools random -n 10^6 -g human.hg19.genome > Out.bed
+# Shuffle locations of genomic intervals:
+bedtools shuffle -i File1.bed -g human.hg19.genome > Out.bed
+```
+
+## UCSC: Overview
+- [UCSC Genome Browser](https://genome.ucsc.edu/)
+- Tool for visualizing genomic intervals
+- Select relevant genome (species and assembly)
+- Search for genes or genomic loci
+- Upload intervals from bed file using add custom tracks
+
+## Cheer for Experiences
+
+The main topic for this experience is ChIP-seq, motif finding, and expression integration. Androgen receptor (AR) is a transcription factor frequently over-activated in prostate cancer. To study AR regulation in prostate cancer, scientists conducted AR ChIP-seq in prostate tumors and normal prostate tissues. Since the difference between individual patients could be quite big, this study actually included many more tumor and normal samples. However, for the purpose of this HW, we will only use the ChIP-seq data from 1 prostate tumor samples (tumor) and 1 normal prostate tissues (normal).  
+
+Hint:
+1). All data needed for this HW are stored at /n/stat115/HW4_2019 on the Odyssey.
+2). It would be helpful to read the MACS README and Nature Protocol paper:
+
+https://pypi.python.org/pypi/MACS2/2.0.10.09132012
+
+http://liulab.dfci.harvard.edu/publications/NatProtoc12_1728.pdf 
+
+
+## Part I. Call AR ChIP-seq peaks
+
+## Question 1: 
+
+Usually we use BWA to map the reads to the genome for ChIP-seq experiment. We will give you one example ChIP-seq single-end sequenced .fastq file with only 1M reads. Run BWA on this file to Hg38 of the human genome assembly. Report the commands, logs files, and a snapshot / screenshot of the output to demonstrate your alignment procedure. What proportion of the reads are successfully mapped (to find at least one location) and what proportions are uniquely mapped (to find a single location) in the human genome in this test sample? We will save you some time and directly give you the BWA mapped BAM files for the sample.
+
+Hint: 
+1). Target sample fastq file is stored as /n/stat115/HW4_2019/tumor_1M.fastq on the Odyssey
+2). The index file is stored as /n/stat115/HW2_2019/bwa_hg38_index/hg38.fasta on the Odyssey
+
+```{r, engine='bash', eval=FALSE}
+# your shebang
+
+module load bwa/0.7.15-fasrc02
+
+bwa mem /path/to/index/fasta /path/to/input/data > /path/to/output/file/your_output_name.sam
+
+```
+
+```{r, engine='bash', eval=FALSE}
+# samtools might be useful to acquire the summary statistics
+# of course you have to load the samtools module first
+$ samtools flagstat bwa.sam
+$ samtools view -bq 1 bwa.sam > unique.bam
+$ samtools flagstat unique.bam
+```
+
+
+## Question 2:
+
+In ChIP-Seq experiments, when sequencing library preparation involves a PCR amplification step, it is common to observe multiple reads where identical nucleotide sequences are disproportionally represented in the final results. This is especially a problem in tissue ChIP-seq experiments (as compared to cell lines) when input cell numbers are low. Removing these duplicated reads can improve the peak calling accuracy. Thus, it may be necessary to perform a duplicate read removal step, which flags identical reads and subsequently removes them from the dataset. Run this on your test sample (1M reads) (macs2 filterdup). What % of reads are redundant? When doing peak calling, MACS filters duplicated reads by default. 
+
+Hint:
+The test samples are stored as /n/stat115/HW4_2019/tumor.bam and /n/stat115/HW4_2019/normal.bam on the Odyssey.
+
+
+```{r, engine='bash', eval=FALSE}
+# your shebang
+
+module load 
+
+macs2 filterdup -i /path/to/input/bam/file -g hs --keep-dup 1 -o ./path/to/output/bed/file/your_output_name.bed
+```
+
+## Question 3:
+
+For many ChIP-seq experiments, usually chromatin input without enriching for the factor of interest is often generated as control. However, in this experiment, we only have ChIP and no control samples. Without control, MACS2 will use the signals around the peaks to infer the chromatin background and estimate the ChIP enrichment over background. What is the estimated fragment size in each? Use MACS2 to call peaks from tumor1 and normal1 separately. How many peaks do you get from each condition with FDR < 0.05 and fold change > 5? 
+
+Call peak for normal sample
+
+```{r, engine='bash', eval=FALSE}
+# your shebang
+
+module load centos6/0.0.1-fasrc01
+module load macs2/2.1.2_dev-fasrc01
+
+macs2 callpeak -t /path/to/your/input/sample/bed/file.bed -f AUTO -g 2.7e9 -q 0.05 --fe-cutoff 5 --outdir path/to/save/your/output/ -n prefix_of_your_output
+```
+
+```{r, engine='bash', eval=FALSE}
+-t/--treatment filename
+-c/--control
+-n/--output name
+-f/--format of tag files
+--outdir/--the folder where all the output files saved into
+-n/--name of the output as NAME_peaks.bed
+-g/--gsize The default hs -- 2.7e9 is recommended as_for UCSC human hg18 assembly
+-q/--qvalue (minimum FDR) cutoff to call significant regions. Default is 0.05.
+```
+
+Repeat this for the tumor sample
+
+
+## Question 4:
+
+Now we want to see whether AR has differential binding sites between prostate tumors and normal prostates. MACS2 does have a function to call differential peaks between conditions, but requires both conditions to have input control. Since we don’t have input controls for these AR ChIP-seq, we will just run the AR tumor ChIP-seq over the AR normal ChIP-seq (pretend the latter to be input control) to find differential peaks. How many peaks do you get with FDR < 0.01 and fold change > 6?
+
+```{r, engine='bash', eval=FALSE}
+# your shebang
+
+module load centos6/0.0.1-fasrc01
+module load macs2/2.1.2_dev-fasrc01
+
+macs2 callpeak -t path/to/your/treat.bed -c path/to/your/control.bed -f AUTO -g 2.7e9 -q 0.01 --fe-cutoff 6 --outdir path/to/your/output/folder/ -n prefix_of_your_output
+
+```
+
+
+## Part II. Evaluate AR ChIP-seq data quality 
+
+## Question 5:
+
+Cistrome Data Browser (http://cistrome.org/db/) has collected and pre-processed most of the published ChIP-seq data in the public. Play with Cistrome DB. Biological sources indicate whether the ChIP-seq is generated from a cell line (e.g. VCaP, LNCaP, PC3, C4-2) or a tissue (Prostate). Are there over 10 AR ChIP-seq data available in human prostate tissues? 
+
+
+
+## Question 6:
+
+Doing transcription factor ChIP-seq in tissues could be a tricky experiment, so sometimes even published studies have very bad data. Look at a few AR ChIP-seq samples in the prostate tissue on Cistrome and inspect their QC reports. Can you comment on what QC measures tell you whether a ChIP-seq is of good or bad quality. Include a screen shot of a good AR ChIP-seq vs a bad AR ChIP-seq. 
+
+## Question 7:
+
+Antibody is one important factor influencing the quality of a ChIP-seq experiment. Click on the GEO (GSM) ID of some good quality vs bad quality ChIP-seq data, and see where they got their AR antibodies. If you plan to do an AR ChIP-seq experiment, which company and catalog # would you use to order the AR antibody? 
+
+# Part III Find AR ChIP-seq motifs
+
+## Question 8:
+
+We want to see in prostate tumors, which other transcription factors (TF) might be collaborating with AR. Try any of the following motif finding tools to find TF motifs enriched in the differential AR peaks you identified above. Did you find the known AR motif, and motifs of other factors that might interact with AR in prostate cancer in gene regulation? Describe the tool you used, what you did, and what you found. Note that finding the correct AR motif is usually an important criterion for AR ChIP-seq QC.
+
+Cistrome: http://cistrome.org/ap/root (Register a free account).
+
+Weeder: http://159.149.160.88/pscan_chip_dev/
+
+HOMER: http://homer.ucsd.edu/homer/motif/ 
+
+MEME: http://meme-suite.org/tools/meme-chip 
+
+
+## Question 9: 
+
+Look at the AR binding distribution in Cistrome DB from a few good AR ChIP-seq data in prostate. Does AR bind mostly in the gene promoters, exons, introns, or intergenic regions? Also, look at the QC motifs to see what motifs are enriched in the ChIP-seq peaks. Do you see similar motifs here as those you found in your motif analyses? 
+
+
+
+
+## Rules for submitting the homework:
+
+Please submit your solution directly on the canvas website. Please
+provide both your code in this Rmd document and an html file for your
+final write-up. Please pay attention to the clarity and cleanness of
+your homework.
+
+The teaching fellows will grade your homework and give the grades with
+feedback through canvas within one week after the due date. Some of the
+questions might not have a unique or optimal solution. TFs will grade
+those according to your creativity and effort on exploration, especially
+in the graduate-level questions.
+
+## Acknowledgement
+- Dr. X. Shirley Liu
+- Matt Ploenzke
+- Jingyu Fan
+
+## Good Luck!
+- Office hour until 7:00 pm for Tuesday
+- Office hour until 8:00 pm for Thursday
+- No additional office hour for this Friday due to the Spring Recess
+- Enjoy your spring break!

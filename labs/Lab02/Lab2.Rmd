@@ -1,0 +1,366 @@
+---
+title: "Stat 115/215: Introduction to Computational Biology"
+subtitle: "Lab 2: Microarrays and Intro python"
+author: "Andy Shi"
+date: "2/5/2019 - 2/7/2019"
+output: slidy_presentation
+---
+
+### Outline
+
+- Normalization with RMA (HW1).
+- Differential gene expression (HW2):
+    - FDR.
+    - LIMMA.
+- Python (HW1).
+- Dynamic programming for Problem 9 (HW1).
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center")
+```
+
+```{r, out.width = "1000px",echo=FALSE}
+knitr::include_graphics("images/genechip.png")
+```
+
+---
+
+```{r, out.width = "1000px",echo=FALSE}
+knitr::include_graphics("images/highlevel.png")
+```
+
+---
+
+```{r, out.width = "1000px",echo=FALSE}
+knitr::include_graphics("images/workflow.png")
+```
+
+---
+
+```{r, out.width = "1000px",echo=FALSE}
+knitr::include_graphics("images/ma.png")
+```
+
+---
+
+### RMA
+
+- Background correction
+    - Observe PM.
+    - Model: PM =  Signal + Background.
+    - Signal $> 0$.
+    - Estimate $E(Signal | PM)$.
+    - Normal distribution imposed on background and exponential
+      distribution imposed on signal to provide closed-form solution and
+      feasibility.
+
+- Quantile normalization.
+
+- Summarize probe intensities:
+    - Denote background-adjusted, normalized, and log-transformed PM intensities = Y.
+    - Fit linear model Y = Sample effect + Probe effect + Noise.
+    - Robust to outliers: Parameters estimated through median polish.
+- Reference: [https://academic.oup.com/biostatistics/article/4/2/249/245074](https://academic.oup.com/biostatistics/article/4/2/249/245074)
+
+---
+
+### Load Libraries
+
+```{r bioc, eval=FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("biobroom", version = "3.8")
+BiocManager::install("drosophila2.db", version = "3.8")
+```
+
+```{r loadLibraries, message=FALSE, warning=FALSE}
+library(affy)
+library(drosophila2.db)
+library(biobroom)
+library(limma)
+library(affyPLM)
+library(dplyr)
+```
+
+---
+
+### Load and view .CEL files
+
+- Experiment: using fruit flies to study alcoholism. Flies were either
+sensitive or resistant to ethanol. Microarray analysis performed.
+- Source: [https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE7614](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE7614).
+- Remember to use `Session > Set Working Directory > To Source Files Location`.
+- The path `data` is relative to your working directory (can check
+working directory with `getwd()`).
+
+```{r loadData}
+celFiles <- list.celfiles(path = "data", full.names=TRUE)
+data.affy <- ReadAffy(filenames = celFiles)
+data.affy
+```
+
+---
+
+### MA Plot and other low-level plots
+
+- $M$: difference in log2 expression between 2 samples.
+- $A$: average log2 expression between two samples.
+- Median / IQR is for the $M$'s.
+- Pairwise MA plots should be centered at $M = 0$ if there is no
+trend favoring any array.
+- Use the `which` argument to specify which samples to use.
+
+```{r MAplot, cache = TRUE}
+MAplot(data.affy, pairs = TRUE, which=c(1,2,3,4),
+       plot.method = "smoothScatter") #MA plot
+#image(data.affy) #array image
+#hist(data.affy) #log intensity density
+boxplot(data.affy, col=c(1:4))
+```
+
+---
+
+### Normalize data with RMA
+
+- Use the `rma` function.
+- Check MA plots after to see if normalization worked.
+
+```{r rma}
+data.rma <- rma(data.affy)
+expr.rma <- exprs(data.rma) # format as table
+```
+
+```{r rma-MAplot, cache = TRUE}
+#compare normalized data with raw data
+MAplot(data.rma, pairs = TRUE, which=c(1,2,3,4),
+       plot.method = "smoothScatter")
+boxplot(data.frame(expr.rma), col=c(1:4))
+```
+
+---
+
+### Calling differentially expressed genes (HW2)
+
+- Given the expression level for each array and gene, how should we call
+differentially expressed genes?
+
+- Linear modeling approach (LIMMA)
+    - Small number of replicates---difficult to estimate variance.
+    - Shrink variance through empirical bayes approach (pooling across
+      genes).
+
+- Use p-values obtained to call DE genes
+
+---
+
+### Multiple hypothesis testing
+
+- Performed many, many statistical tests so chance of finding false
+positives is higher.
+
+- Need a more stringent $\alpha$ to control Type I error and FDR.
+
+- Simple Bonferroni correction too conservative (may lose out on calling DE genes).
+
+- Benjamini-Hochberg method the most common for controlling FDR.
+
+![https://www.xkcd.com/882/](https://imgs.xkcd.com/comics/significant.png )
+
+---
+
+### False Discovery Rate (FDR)
+
+- Definition: Proportion of rejected hypotheses that are incorrectly
+rejected.
+
+- Common FDR thresholds are 1%, 5%, and 10%
+
+- Interpretation: at FDR cutoff of 0.05, among all hypotheses rejected
+with FDR $\leq 0.05$, 5% are incorrectly rejected.
+
+- Converting: p-value, FDR, q-value are monotonic
+
+- Use FDR and (log) fold change to get typically 500-2000 differentially
+expressed genes
+
+- Active area of research with lots of methods being developed!
+
+---
+
+### LIMMA Overview
+
+- LIMMA fits the following model for each gene:
+
+$$
+y_{ij} = \alpha_j + \beta_j X_i
+$$
+
+- $y_{ij}$: Expression index for gene $j$ in sample $i$.
+- $\alpha_j$: Intercept / "baseline" for gene $j$.
+- $X_i$: Covariate for subject $i$.
+- $\beta_j$: Change in gene expression index.
+- Pools information across multiple genes to stabilize standard error
+estimation.
+
+---
+
+### LIMMA Setup
+
+- Need to specify a design matrix: specify the covariates for each sample.
+- Get information about the samples from GEO:
+    - For this dataset: [https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE7614](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE7614)
+    - For the HW: [https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE39452](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE39461)
+
+- In this example:
+    - Mean log2 gene expression for control group: $\alpha$.
+    - Mean log2 gene expression for treated group: $\alpha + \beta$.
+    - $\beta$ represents the mean difference in log2 gene expression
+    between treated and controls.
+
+```{r limma-setup}
+head(expr.rma)
+sensitive <- c(0, 0, 1, 1) # assign control and trt groups
+design.mat <- model.matrix(~sensitive)
+design.mat
+```
+
+---
+
+### LIMMA to call DE Genes
+
+- `lmFit`, `eBayes`, and `tidy`.
+- Add a column for FDR.
+- Sort by p-value.
+
+```{r limma}
+# Use limma to call differentially expressed genes
+limma_fit <- lmFit(expr.rma, design.mat) %>%
+    eBayes() %>%
+    tidy() %>%
+    mutate(fdr = p.adjust(p.value, method = "fdr")) %>%
+    arrange(p.value)
+head(limma_fit)
+
+limma_fit %>% filter(fdr <= 0.05, abs(estimate) > log2(1.5))
+```
+
+---
+
+### R Technique: Writing your own functions
+
+- Reuse code without copy/pasting.
+- Easier debugging.
+- If you have the same code in 2+ places, write a function instead.
+
+```{r limma-func}
+fit_limma <- function(expr_matrix, design_matrix) {
+    fit <- lmFit(expr_matrix, design_matrix) %>%
+        eBayes() %>%
+        tidy() %>%
+        mutate(fdr = p.adjust(p.value, method = "fdr")) %>%
+        arrange(p.value)
+    return(fit)
+}
+
+fit_limma(expr.rma, design.mat)
+```
+
+### Illustration of Benjamini-Hochberg Procedure
+
+- Plot of p-values (black) vs. $\alpha / m$ line.
+    - $\alpha$: Significance threshold for hypothesis test
+    (usu. $\alpha = 0.05$).
+    - $m$: Number of tests. In this case, number of genes.
+- P-values under this line have FDR $\leq 0.05$.
+
+```{r bh, message = FALSE, warning = FALSE, echo = FALSE}
+library(cowplot)
+bh_plot <- data.frame(pvalue = limma_fit$p.value,
+                      index = 1:nrow(limma_fit)) %>%
+    ggplot(aes(x = index, y = pvalue)) +
+    geom_line() +
+    geom_abline(slope = 0.05 / nrow(limma_fit), intercept = 0,
+                color = "red") +
+    xlab("Index") +
+    ylab("P-Value")
+
+bh_plot_zoom <- bh_plot +
+    coord_cartesian(xlim = c(0, 250), ylim = c(0, 0.0008)) +
+    ggtitle("Zoomed In")
+plot_grid(bh_plot, bh_plot_zoom, nrow = 1)
+
+```
+
+---
+
+### Converting Gene Names
+
+- Uses cdf file.
+- Organisms have an annotation dataframe.
+    - This lab: *Drosophila* data, so we will use the `drosophila2`
+    package.
+    - For the HW, you will need the `hgu133plus2.db` package for
+    human samples.
+- Inner join to merge the two dataframes: only keep rows that are
+present in **both** dataframes.
+
+```{r annot}
+# Convert gene names
+Annot <- data.frame(
+    PROBEID = keys(drosophila2.db),
+    REFSEQ = sapply(contents(drosophila2REFSEQ), paste, collapse=", "),
+    SYMBOL = sapply(contents(drosophila2SYMBOL), paste, collapse=", "),
+    DESC = sapply(contents(drosophila2GENENAME), paste, collapse=", "),
+    stringsAsFactors = FALSE)
+
+inner_join(limma_fit, Annot, by = c("gene" = "PROBEID"))
+```
+
+---
+
+### Python
+
+- Installing:
+    - Should be already on Macs and Linux.
+    - Windows: Install [Miniconda](https://docs.conda.io/en/latest/miniconda.html)
+- Can edit with RStudio or a text editor of your choice. [Sublime](https://www.sublimetext.com/) is a good option.
+- Big differences from R:
+    - Indexing starts from 0.
+    - Use whitespace to separate blocks.
+
+---
+
+### Python Examples
+
+- Check out the `python_examples` folder.
+
+---
+
+### Problem 9 on HW: Dynamic programming
+
+- Find the maximum subset sum. Print out both the sum and the starting
+and ending index.
+- Must use dynamic programming: only loop through the array once.
+- Dynamic programming: solve overlapping sub-problems.
+- Notation: array $A$ with $k$ elements $\{A_0, A_1, \ldots, A_{k - 1}\}$.
+- If we know the maximum subset sum up to position i is $B_i$, what is
+the maximum sum up to position $i + 1$?
+    - $B_{i + 1} = \max(B_i + A_{i + 1}, A_{i+1})$.
+    - Can loop through the array and iterate over $i$.
+    - Keep track of the maximum of the $B_i$.
+    - Maximum subset sum is $\max_{i} B_i$.
+
+### Problem 9: Indexes, runtime, and memory.
+
+- End index of maximum subset sum is the maximizing $i$.
+- Start index:
+    - Start index for a sequence changes when we pick $A_{i + 1}$
+    instead of $A_{i + 1} + B_{i}$.
+    - Keep track of the current start index.
+    - When the maximum $B_i$ changes, update the start index of the
+    maximum subset sum.
+- Only need to loop through the array once. Only 1 `for` loop.
+- Memory: Don't need to store all the $B_i$, just the previous one.
+- $O(1)$ space and $O(n)$ runtime.
