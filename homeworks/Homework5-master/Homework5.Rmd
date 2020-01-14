@@ -1,0 +1,199 @@
+---
+title: "Stat 115 2019: Homework 5"
+author: "(your name)"
+date: "Due: April 14, 2019 at 11:59pm"
+output: html_document
+---
+
+The main topics for this experience include Hidden Markov Model (HMM), Epigenetics, and GWAS Interpretation. The teaching team has prepared the data on the Odyssey at /n/stat115/HW5_2019/data/hw5. Please email the TA if you have problems accessing the original data. Good luck!
+
+```{r, eval=FALSE}
+# Install required packages
+```
+
+```{r libraries, message = FALSE}
+# Library riquired packages
+```
+
+
+# Part I: Hidden Markov Model
+
+CpG islands are stretches of CG-rich sequences in the genome. They are often functionally important, since 50% of the human genes have a CpG island around 500bp upstream of the transcription start site. Of course, CpG island sequence is not all CG, and non-CpG island sequences could still contain some CG. Therefore, we could use HMM to predict CpG islands by looking at a long stretch of DNA. Now as an HMM practice, we just have a short sequence AGGCGT.
+
+The parameters of the HMM model are:
+Initial probability: 0.3 of CpG (abbreviated as C) and 0.7 of non-CpG (abbreviated as N).
+Transition probability: Pb(CpG to CpG) = 0.6, Pb(non-CpG to non-CpG) = 0.7.
+Emission probability: Pb(A, C, G, T | CpG) = (0.1, 0.4, 0.4, 0.1), Pb(A, C, G, T | non-CpG) = (0.3, 0.2, 0.2, 0.3).
+
+
+## Q1. For both: Use the forward-backward procedure to calculate the probability of CpG at every observation position and Viterbi algorithm to calculate the Hidden state path. Output the following probabilities:
+
+|Algorithm|$t_1$|$t_2$|$t_3$|$t_4$|$t_5$|$t_6$|
+|---------|-----|-----|-----|-----|-----|-----|
+|Forward  |$\alpha_1$(C)|$\alpha_2$(C)|$\alpha_3$(C)|$\alpha_4$(C)|$\alpha_5$(C)|$\alpha_6$(C)|
+|         |$\alpha_1$(N)|$\alpha_2$(N)|$\alpha_3$(N)|$\alpha_4$(N)|$\alpha_5$(N)|$\alpha_6$(N)|
+|Backward |$\beta_1$(C)|$\beta_2$(C)|$\beta_3$(C)|$\beta_4$(C)|$\beta_5$(C)|$\beta_6$(C)|
+|         |$\beta_1$(N)|$\beta_2$(N)|$\beta_3$(N)|$\beta_4$(N)|$\beta_5$(N)|$\beta_6$(N)|
+|Forward- |$\gamma_1$(C)|$\gamma_2$(C)|$\gamma_3$(C)|$\gamma_4$(C)|$\gamma_5$(C)|$\gamma_6$(C)|
+|backward |$\gamma_1$(N)|$\gamma_2$(N)|$\gamma_3$(N)|$\gamma_4$(N)|$\gamma_5$(N)|$\gamma_6$(N)|
+
+
+## Q2. For both: After finishing your calculations manually, you can compare your results with the R package “HMM”. 
+
+```{r p1q2}
+# your code here
+```
+
+
+## Q3. For Graduate Students: Adjust the initial probabilities to a range of values and evaluate its effect on the outcome of the forward-backward inference. 
+
+```{r p1q3}
+# your code here
+```
+
+## Q4. For Graduate Students: Describe the similarity and differences, in terms of the calculation steps, the R command, and the final paths, if you were to use the Viterbi algorithm instead of forward-backward. 
+
+```{r p1q4}
+# your code here
+```
+
+If we use the HMM to solve the following bioinformatics problems, what is the observations (e.g. coin flip), and what is the hidden states (e.g. the coins used)? What’s the transition probability (e.g. the transition from fair to biased coin) and what is the emission probability (e.g. p(H | fair coin). 
+
+## Q5. For both: Predict protein secondary structure from amino acid sequence. 
+
+
+## Q6. For both: Predict genome-wide chromatin states from histone mark ChIP-seq. 
+
+
+## Q7. For Graduate Students: Predict TAD domain boundaries based on HiC interaction map. 
+
+
+## Q8. For Graduate Students: Predict copy number variations from whole genome sequencing data.
+
+
+# Part II: Feature selection and regression, epigenetic gene regulation
+
+Different histone marks are enriched in different elements of the genome and have different effect on gene expression. In this homework, we want to look at the GM12878 cell line with gene expression data and ChIP-seq profiles of 10 different histone marks: H3K4me1, H3K4me2, H3K4me3, H3K9ac, H3K27me3, H3K27ac, H3K79me2, H3K36me3.The gene expression data for each RefSeq transcript is summarized in a file called GMexpr.txt. 
+
+For each histone mark ChIP-seq data, we already parsed out the following read counts for each RefSeq sequence (in the file histone_marks_read_count_table.txt): distal promoter [-5KB, -1KB] from transcription start site (TSS), proximal promoter [-1kb, +1kb] from TSS, gene body (from transcription start to end, including all exons and introns), transcript (concatenate all the exons), first half, second half of transcript (concatenated exons, length-wise), first half, second half of all the introns (concatenated introns). The table has one line for each RefSeq, and 81 columns (RefSeq ID, gene body length, total transcript length, total intron length, 8 histone marks each with 8 features, so  8* 8), the value is read count for each feature. 
+
+## Q1. For both: Write a quick python script to filter out RefSeq that have only histone mark or expression data available but not both. 
+
+```{r p2q1,eval=FALSE}
+# your python code here
+```
+
+## Q2. For Graduate Students: Based on the histone mark count table, do you see enrichment of some histone marks on the different parts of genes? 
+
+
+## Q3. For both: Run linear regression on the log read count for each of the histone mark features (one of 81 columns) with gene expression. List those histone mark features statistically correlated with gene expression. Which feature is the most positively correlated with gene expression? Which is the most negatively correlated? Do you need multiple hypothesis correction? 
+
+```{r p2q3}
+# your code here
+```
+
+## Q4. For both: Draw a PCA plot of the different columns in the count table. How does features in the PCA correspond to the significant correlated features in Q3. 
+
+```{r p2q4}
+# your code here
+```
+
+## Q5. For Graduate Students: Compare the regression results, if you use raw read count, log count, square root of read count of the histone marks, and see which one gives the best regression to expression. Can you speculate why?
+
+```{r p2q5}
+# your code here
+```
+
+## Q6. For Graduate Students: Since different transcripts have different length, the read count table might need to be normalized by the gene body, total transcript, total total intron lengths (note distal promoter is always 4KB and proximal promoter is always 2KB. Try to normalize each read count column by region length. How does that change the results in Q4? 
+
+```{r p2q6}
+# your code here
+```
+
+Next, we want to select a small subset of histone mark features that best recapitulates gene expression. For feature selection, we use glmnet from: 
+http://cran.r-project.org/web/packages/glmnet/index.html
+
+
+## Q7. For both: Run LASSO regression to select the most informative histone mark features of gene expression. How many features are selected and what are these? List the strongest 5 factors. 
+
+```{r p2q7}
+# your code here
+```
+
+## Q8. For both: Do a 3-fold cross validation to see how good are the histone mark features selected by LASSO are at predicting gene expression in the training and testing data? 
+
+```{r p2q8}
+# your code here
+```
+
+## Q9. For Graduate students: Based on your LASSO model, how well does histone marks predict gene expression? Plot the residual between the predicted gene expression (from histone marks) and the actual gene expression (Y axis) along different gene expression level (X axis)? Does the residual look normally distributed along the gene expression level? Can you guess why? Hints: http://liulab.dfci.harvard.edu/publications/NucleicAcidsRes12_6414.pdf 
+
+```{r p2q9}
+# your code here
+```
+
+# Part III: Infer transcription regulation from epigenetics 
+
+The molecular mechanism of a type of T cell leukemia is poorly understood. Since it is unclear which transcription factors (TF) are involved, scientists can’t do TF ChIP-seq. Instead, ATAC-seq was performed on the T cells from both the normal donors and the T cell leukemia patients on many individuals. For this HW, we will only select 3 normal (norm1, norm2, norm3) and 3 leukemia (leuk1, leuk2, leuk3) samples, and give you the read mapping BAM files (to Hg38). This part of the HW will show you how epigenetic profiling combined with motif analyses can help identify key transcription factors and the regulatory mechanisms of biological processes and diseases. 
+
+Unlike ChIP-seq which often uses chromatin input as controls, ATAC-seq has no control samples. The best way to call differential ATAC-seq peaks between the tumor and normal is to obtain the union of tumor and normal ATAC-seq peaks, extract the read counts from all the 6 samples in the union peaks, then run DESeq2 on them to find differential peaks. SAMTools (http://samtools.sourceforge.net/) and BEDTools (https://bedtools.readthedocs.io/en/latest/) are extremely useful tools to manipulate SAM/BAM and BED files. Let’s try them here.
+
+
+## Q1. For Graduate Students: One way of getting the union peak is to run MACS on each of the samples separately, then use BEDTools to merge the peaks together. E.g. if we use MACS to run peak calling on norm1 (norm1.bed) and leuk1 (leuk1.bed), can you merge the two sets of peaks into one merge.bed file using BEDTools? 
+
+```{r p3q1, engine='bash', eval=FALSE}
+# your bash code here
+```
+
+## Q2. For Graduate Students: Another way of calling the union peaks is to concatenate all the 6 BAM files together, then run MACS. We have done this already (union.bed). Use BEDTools to calculate the Jaccard index between the union.bed and merge.bed you got in Q1. Jaccard index between set A and set B is defined as (A $\cap$ B)/(A $\cup$ B). 
+
+```{r p3q2, engine='bash', eval=FALSE}
+# your bash code here
+```
+
+## Q3. For both: Extract the reads from the six BAM files in the union.bed peaks. Either the BEDTools multicov function or SAMTools bedcov function can achieve this, and generate a read count matrix on the peaks in the six files. 
+
+```{r p3q3, engine='bash', eval=FALSE}
+# your bash code here
+```
+
+## Q4. For both: Run DESeq2 on the six samples to identify differential ATAC-seq peaks between the 3 leukemia and 3 normal samples. 
+
+```{r p3q4}
+# your code here
+```
+
+## Q5. For both: Take the leukemia-specific and normal-specific ATAC-seq peaks, and run motif finding on them separately as you did in HW4. What transcription factor motifs are enriched in leukemia-specific and normal-specific ATAC-seq peaks, respectively? 
+
+
+## Q6. For Graduate Students: Take the leukemia-specific and normal-specific ATAC-seq peaks, and run them separately on Cistrome Toolkit to see what public ChIP-seq have significant overlap with them. Based on this and the motif finding analyses before, what factors might be important in regulating this type of leukemic T cells versus normal T cells, respectively? 
+
+
+## Q7. For Graduate Students: In HW4, we mentioned that sometimes members of the same transcription factor family (e.g. STAT1, 2, 3, 4, 5, 6) have similar binding motifs, similar binding sites (whey they are expressed, although they might be expressed in very different tissues), and related functions. Supposedly we don’t have RNA-seq of these samples to calculate the expression level of the TF. However, using Cistrome-GO to assign the ATAC-seq peaks to genes can usually infer the expression level of a gene (i.e. a gene with many ATAC-seq peaks near its TSS is often expressed at higher level). Please describe (no need to actually do this) how you would use this approach to refine the hypothesis on the specific TFs that might regulate this type of leukemic T cells versus normal T cells, respectively? 
+
+
+# Part IV: GWAS and epigenetics
+
+Visit the ENCODE Encyclopedia page at: https://www.encodeproject.org/data/annotations/
+You will see candidate Regulatory Elements (cREs) and an entry to SCREEN. Watch the tutorials, especially on GWAS. Browse the list of genome-wide association studies (GWAS) in SCREEN to see how many significant SNPs each study reported and whether based on these hits, the ENCODE project is able to find an epigenetic profile with peaks that significantly matched to these SNPs. 
+
+## Q1. For both: One GWAS study (Arking et al, PMID 24952745) identified 73 SNPs significantly associated with QT interval. Use SCREEN to identify cells whose epigenetic profile significantly overlap with the 73 GWAS SNPs. What is the cell type with enhancer-like cREs that most significantly overlaps SNPs identified in this GWAS? For SNP rs6843082, comment on the gene it is likely to regulate and why this might be related to QT interval.
+
+
+
+# Rules for submitting the homework:
+
+Please submit your solution directly on the canvas website. Please
+provide both your code in this Rmd document and an html file for your
+final write-up. Please pay attention to the clarity and cleanness of
+your homework.
+
+The teaching fellows will grade your homework and give the grades with
+feedback through canvas within one week after the due date. Some of the
+questions might not have a unique or optimal solution. TFs will grade
+those according to your creativity and effort on exploration, especially
+in the graduate-level questions.
+
+
+
+

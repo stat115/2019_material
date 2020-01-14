@@ -1,0 +1,148 @@
+---
+title: "Stat 115 2019: Homework 3"
+author: "(your name)"
+date: "Due: March 10, 2019 at 11:59pm"
+output: html_document
+---
+
+```{r, eval=FALSE}
+# Install required packages
+source("https://bioconductor.org/biocLite.R")
+biocLite("BiocUpgrade")
+biocLite("DESeq2")
+biocLite("tximport")
+biocLite("EnsDb.Hsapiens.v86")
+install.packages("rjson")
+install.packages('Seurat')
+install.packages('dplyr')
+```
+
+```{r libraries, message = FALSE}
+library(DESeq2)
+library(EnsDb.Hsapiens.v86)
+library(tximport)
+library(rjson)
+library(Seurat)
+library(dplyr)
+```
+
+# Part I. RNA-seq analyses
+
+For this HW, we will use the RNA-seq data of HepG2 with U2AF1 knock down and control, each with 2 replicates. 
+https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE88002
+https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE88226 
+
+The raw FASTQ files are available on Odyssey at: /n/stat115/HW3_2019/FastqData/
+
+##1. In HW2, we explored RNA-seq read alignment to the reference genome using STAR (there are also algorithms such as TopHat and HiSAT, etc). They are relatively slow compared to the newer pseudo-mapping techniques such as Kalisto and Salmon which only align reads to the RefSeq transcriptome. These pseudo-aligners greatly simplify the process of going from FASTQ to read counts on genes and are much faster. Run Salmon (Patro et al, Nat Methods 2017) on this data to generate the quant.sf file. How does Salmon on a full RNA-seq data compare in runtime to STAR on 3M fragments in HW2? What is the gene with the highest TMP in the sample?
+Hint: Check out the original experiment design to match the fastq files correctly.
+https://www.encodeproject.org/experiments/ENCSR067GHD/
+https://www.encodeproject.org/experiments/ENCSR372UWV/
+
+```{r, engine='bash', eval=FALSE}
+# your bash code here
+```
+
+
+##2. Run DESeq2 (Love et al, Genome Biol 2014) to find the differentially expressed transcripts between U2AF1 knock down and control. How many RefSeq transcripts are up vs down-regulated by U2AF1 knock down? Provide an MA plot displaying the differential expression.  
+Hint: https://www.bioconductor.org/help/workflows/rnaseqGene/ 
+
+```{r}
+# your code here
+```
+
+##3. Use some GO analysis tool to examine whether U2AF1 regulates some specific functions / processes / pathways. 
+
+
+##4. For GRADUATE students: DESeq2 can optionally aggregate the differential expression at either transcript (no aggregate) or gene level (aggregate). How do the DE results compare between with and without aggregation to gene level, in terms of the genes / transcripts called and the GO categories? 
+
+```{r}
+# your code here
+```
+
+##5. For GRADUATE students: Are the same genes or transcripts called as differentially expressed if you use TPMs (i.e. abundances) instead of counts? Explain the difference between TPMs and counts.
+```{r}
+# your code here
+```
+
+
+
+# Part II. Singel cell RNA-seq
+
+For this exercise, we will be analyzing a single cell RNA-Seq dataset of human peripheral blood mononuclear cells (PBMC) from the 10X Genomics platform. There are 2,700 single cells that were sequenced on the Illumina NextSeq 500. The raw data can be found at: https://support.10xgenomics.com/single-cell/datasets/.
+
+
+##1. Read the 10X data and create a Seurat (Butler et al., Nature Biotechnology 2018) Object. Describe the composition of the raw dataset (i.e. number of genes, number of samples, and dropout rate). 
+
+```{r}
+# your code here
+```
+
+##2. We want to filter cells with very few detected genes and genes that are detected in very few cells. Let’s keep all genes expressed in >= 3 cells, and all cells with >= 200 detected genes. How do these summary statistics change after filtering?
+
+```{r}
+# your code here
+```
+
+##3. Next we will filter cells with high proportion of mitochondrial reads (potential dead cells) or outlier number of genes (potential multiplets). What is the distribution of number of genes and UMIs in your dataset? What proportion of the counts from your filtered dataset map to mitochondrial genes? Remove those cells with high mitochondrial rate (>5%). Cells with extremely high gene coverage could also be outliers thus should be removed. The cutoff depends on the scRNA-seq technology and the distribution of each dataset. For this data, let’s filter cells with > 2500 covered genes.
+
+```{r}
+# your code here
+```
+
+##4. Use global-scaling normalization method in Seurat with the scaling factor 10000, so all the cells will be normalized to have the same sequencing depth to 10K. Use the Seurat function "FindVariableGenes" to select the genes showing expression variability, then perform PCA on these genes. Provide summary plots, statistics, and tables to show 1) how many variable genes are used in the PCA analysis, 2) how many PCs are statistically significant, 3) which genes contribute to each of the significant PCs, and 4) how much variability is explained in each of the significant PCs.
+
+```{r}
+# your code here
+```
+
+##5. For GRADUATE students: Sometimes scRNA-seq data might have significant PCs that are heavily weighted by cell cycle genes, which need to be removed before downstream analyses. Check the top PCs in this data to see whether cell cycle components need to be removed. Provide plots and other quantitative arguments to support your case. 
+
+```{r}
+# your code here
+```
+
+##6. Use Seurat to run tSNE on the top 10 principle components (regardless of how many PCs are statistically significant) from Q4. Visualize the cells and their corresponding tSNE coordinates and comment on the number of cell clusters that become apparent on tSNE. On a 2D plot, does tSNE clustering differ from PCA clustering?
+
+```{r}
+# your code here
+```
+
+##7. For GRADUATE students: If you run tSNE several times with different k.seed, are the number of clusters the same and are the clusters robust?
+
+```{r}
+# your code here
+```
+
+##8. For GRADUATE students: Try different resolutions in tSNE and visualize these clusters on the tSNE graph. How does changing resolution influence the number of clustering and the number of cells assigned to each cluster?
+
+```{r}
+# your code here
+```
+
+##9. Use resolution = 0.6, how many cells are assigned to each group? Using Seurat to calculate differential expression between clusters, identify putative biomarkers for each cell subpopulation. Visualize the gene expression values of these potential markers on your tSNE coordinates.
+
+```{r}
+# your code here
+```
+
+##10. For GRADUATE students: Based on the expression characteristics of your cell clusters, provide putative biological annotation (e.g. MS4A1, CD79A genes are high in B-cells) for the clusters. This paper (Newman et al, Nat Methods 2015, https://www.nature.com/articles/nmeth.3337) may serve as a good resource as well as this tutorial PBMC (https://satijalab.org/seurat/pbmc3k_tutorial.html). 
+
+```{r}
+# your code here
+```
+
+# Rules for submitting the homework:
+
+Please submit your solution directly on the canvas website. Please
+provide both your code in this Rmd document and an html file for your
+final write-up. Please pay attention to the clarity and cleanness of
+your homework.
+
+The teaching fellows will grade your homework and give the grades with
+feedback through canvas within one week after the due date. Some of the
+questions might not have a unique or optimal solution. TFs will grade
+those according to your creativity and effort on exploration, especially
+in the graduate-level questions.
+
+
